@@ -310,24 +310,170 @@ function formatDate(iso: string, el: HTMLElement, part: DatePart | null): string
   return `${m}${sep}${y}`;
 }
 
+/** Logg i sidens konsoll (DevTools), så vi kan se hva som skjer på ekte sider. */
+const log = (...args: unknown[]) => console.info("[Masterkey]", ...args);
+
+const describeEl = (el: Element) =>
+  `<${el.tagName.toLowerCase()}${el.id ? `#${el.id.slice(0, 30)}` : ""}${el.getAttribute("data-automation-id") ? ` [${el.getAttribute("data-automation-id")}]` : ""}${el.getAttribute("role") ? ` role=${el.getAttribute("role")}` : ""}>`;
+
+/** Musen «svever» over elementet: mange lister markerer raden før de godtar klikket. */
+function hover(el: HTMLElement) {
+  const r = el.getBoundingClientRect?.();
+  const mouse: MouseEventInit = { bubbles: true, cancelable: true, composed: true, clientX: r ? r.left + r.width / 2 : 0, clientY: r ? r.top + r.height / 2 : 0 };
+  const Pointer = (el.ownerDocument.defaultView as (Window & typeof globalThis) | null)?.PointerEvent;
+  for (const type of ["pointerover", "pointerenter", "pointermove"]) {
+    if (Pointer) el.dispatchEvent(new Pointer(type, { ...mouse, pointerId: 1, pointerType: "mouse", isPrimary: true, bubbles: type !== "pointerenter" }));
+  }
+  el.dispatchEvent(new MouseEvent("mouseover", mouse));
+  el.dispatchEvent(new MouseEvent("mouseenter", { ...mouse, bubbles: false }));
+  el.dispatchEvent(new MouseEvent("mousemove", mouse));
+}
+
 /** Klikk som en ekte bruker: mange rammeverk (bl.a. Workday) reagerer på mousedown, ikke på click. */
 function realClick(el: HTMLElement) {
-  const opts: MouseEventInit = { bubbles: true, cancelable: true };
+  // Midt på elementet, som et ekte musetrykk (noen lister sjekker at trykket er innenfor raden).
+  const r = el.getBoundingClientRect?.();
+  const clientX = r ? r.left + r.width / 2 : 0;
+  const clientY = r ? r.top + r.height / 2 : 0;
+  const mouse: MouseEventInit = { bubbles: true, cancelable: true, composed: true, clientX, clientY, button: 0, detail: 1 };
   const Pointer = (el.ownerDocument.defaultView as (Window & typeof globalThis) | null)?.PointerEvent;
-  el.focus?.({ preventScroll: true });
-  if (Pointer) el.dispatchEvent(new Pointer("pointerdown", { ...opts, pointerType: "mouse" }));
-  el.dispatchEvent(new MouseEvent("mousedown", opts));
-  if (Pointer) el.dispatchEvent(new Pointer("pointerup", { ...opts, pointerType: "mouse" }));
-  el.dispatchEvent(new MouseEvent("mouseup", opts));
-  el.click();
+  const pointer = (type: string, buttons: number) =>
+    Pointer && el.dispatchEvent(new Pointer(type, { ...mouse, buttons, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+
+  hover(el);
+  pointer("pointerdown", 1);
+  const allowed = el.dispatchEvent(new MouseEvent("mousedown", { ...mouse, buttons: 1 }));
+  // Som nettleseren: flytt fokus bare hvis siden ikke stoppet det. Lister stopper ofte mousedown
+  // for å beholde fokus i søkefeltet; flytter vi fokus likevel, lukker de seg uten å velge.
+  if (allowed) el.focus?.({ preventScroll: true });
+  pointer("pointerup", 0);
+  el.dispatchEvent(new MouseEvent("mouseup", mouse));
+  el.dispatchEvent(new MouseEvent("click", mouse));
 }
 
 const PLACEHOLDER_OPTION = /^(select|velg|choose|vel)\b|^-+$|^no items|^no results|^ingen (treff|resultater)/;
 
+/** Alternativer i åpne lister. Workday bruker også data-automation-id="promptOption" i søkefelt. */
+const OPTION_SELECTOR = '[role="option"], [data-automation-id="promptOption"]';
+
 function visibleOptions(doc: Document): HTMLElement[] {
-  return Array.from(doc.querySelectorAll<HTMLElement>('[role="option"]')).filter(
+  const all = Array.from(doc.querySelectorAll<HTMLElement>(OPTION_SELECTOR)).filter(
     (o) => isVisible(o) && !PLACEHOLDER_OPTION.test(norm(o.textContent ?? "")),
   );
+  // Samme alternativ kan treffe begge selektorene (rad + innhold): behold det ytterste.
+  return all.filter((o) => !all.some((other) => other !== o && other.contains(o)));
+}
+
+/** Hele raden et alternativ står i (Workday: radioknapp og tekst er søsken i samme rad). */
+function optionRow(option: HTMLElement): HTMLElement {
+  return (
+    option.closest<HTMLElement>('[role="option"], [data-automation-id="promptLeafNode"], [data-automation-id="menuItem"]') ??
+    (option.matches('[data-automation-id="promptOption"]') ? option.parentElement : null) ??
+    option
+  );
+}
+
+/** Teksten til et alternativ. Workday legger den nøyaktige teksten i data-automation-label. */
+function optionLabel(option: HTMLElement): string {
+  const labelled = option.matches("[data-automation-label]") ? option : option.querySelector("[data-automation-label]");
+  return (labelled?.getAttribute("data-automation-label") ?? option.textContent ?? "").trim();
+}
+
+/**
+ * Elementer å klikke, i rekkefølge. Klikk bobler oppover, ikke sidelengs, så sitter håndteringen
+ * på radioknappen ved siden av teksten (Workday), må vi klikke radioknappen.
+ */
+function clickTargets(option: HTMLElement): HTMLElement[] {
+  const row = optionRow(option);
+  const control = row.querySelector<HTMLElement>('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]');
+  const text = row.querySelector<HTMLElement>('[data-automation-id="promptOption"]');
+  let deepest: HTMLElement = row;
+  const wanted = norm(optionLabel(option));
+  for (;;) {
+    const child = Array.from(deepest.children).find((c) => norm(c.textContent ?? "") === wanted) as HTMLElement | undefined;
+    if (!child) break;
+    deepest = child;
+  }
+  return [...new Set([control, row, text, deepest, option].filter((x): x is HTMLElement => Boolean(x)))];
+}
+
+/** Feltets tekst uten selve listen og treffene (listen kan ligge inni feltet). */
+function fieldTextWithoutList(field: Element): string {
+  const clone = field.cloneNode(true) as HTMLElement;
+  clone
+    .querySelectorAll(`${OPTION_SELECTOR}, [role="listbox"], [data-automation-id="promptLeafNode"], [data-automation-id="activeListContainer"], input, textarea, select`)
+    .forEach((n) => n.remove());
+  return norm(clone.textContent ?? "");
+}
+
+/** Workday-felt (formField-…) viser alltid valget i feltet, så der kan vi sjekke strengt. */
+const isStrictField = (field: Element | null) => Boolean(field?.matches?.('[data-automation-id^="formField-"]'));
+
+/** Står det valgte alternativet nå i feltet (som en «pille» e.l.), eller i knappen? */
+function selectionShows(field: Element | null, optionText: string): boolean {
+  return Boolean(field && fieldTextWithoutList(field).includes(norm(optionText)));
+}
+
+/**
+ * Velg et alternativ og sjekk at det satt. Prøver klikk på riktig element først, så tastatur
+ * (pil ned til alternativet + Enter) via `keyTarget` hvis klikket ikke ble registrert.
+ */
+async function chooseOption(option: HTMLElement, index: number, field: Element | null, keyTarget: HTMLElement): Promise<boolean> {
+  const text = optionLabel(option);
+  const before = field ? fieldTextWithoutList(field).includes(norm(text)) : false;
+  const strict = isStrictField(field);
+  // Workday tegner listen på nytt når musen er over den, så «raden forsvant» betyr ikke at den
+  // ble valgt. Der krever vi at valget står i feltet. Andre steder holder det at listen lukket seg.
+  const done = () => (!before && selectionShows(field, text)) || (!strict && (!option.isConnected || !isVisible(option)));
+  const doc = option.ownerDocument;
+  const pressKey = (k: string) => {
+    const target = (doc.activeElement as HTMLElement | null) ?? keyTarget;
+    key(target, "keydown", k);
+    key(target, "keyup", k);
+  };
+
+  // Raden kan bli tegnet på nytt (nye elementer) når musen kommer over den: finn den igjen på teksten.
+  const again = () => visibleOptions(doc).find((o) => norm(optionLabel(o)) === norm(text)) ?? option;
+  option.scrollIntoView?.({ block: "nearest" });
+  hover(optionRow(option));
+  await sleep(80);
+  // Prøv radioknapp/avkrysning, så raden, så teksten. Stopp så snart valget sitter.
+  const targets = clickTargets(again());
+  log(`velger «${text}» (nr. ${index + 1}). Klikkmål:`, targets.map(describeEl).join(", "));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const target = clickTargets(again())[attempt];
+    if (!target) break;
+    realClick(target);
+    if (await waitFor(done, 900)) {
+      log(`valgt med klikk på ${describeEl(target)}`);
+      return true;
+    }
+  }
+  log("klikk ble ikke registrert, prøver tastatur");
+
+  // Tastatur: pil ned til raden i et menneskelig tempo (for raske trykk blir slått sammen),
+  // sjekk at riktig rad er markert, og velg med Enter (eller mellomrom for avkrysningsrader).
+  simulateFocus(keyTarget);
+  const highlighted = () => {
+    const rows = visibleOptions(doc);
+    return rows.find((o) => o.getAttribute("aria-selected") === "true" || o.matches(":focus, :focus-within") || o.getAttribute("data-focused") === "true");
+  };
+  const isTarget = (o: HTMLElement | undefined) => Boolean(o && norm(optionLabel(o)) === norm(text));
+  for (let n = 0; n <= index + 2 && !isTarget(highlighted()); n++) {
+    pressKey("ArrowDown");
+    await sleep(140);
+    // Vet vi hvilken rad som er markert, stopper vi så snart det er riktig rad.
+    if (n >= index && !highlighted()) break;
+  }
+  for (const k of ["Enter", " "]) {
+    pressKey(k);
+    if (await waitFor(done, 1000)) {
+      log(`valgt med tastatur (${k === " " ? "mellomrom" : k})`);
+      return true;
+    }
+  }
+  log("fikk ikke valgt", `«${text}»`, "– markert rad:", highlighted() ? optionLabel(highlighted()!) : "ingen");
+  return false;
 }
 
 /** Indeksen til alternativet som passer best. Grad sammenlignes på nivå, resten på tekst. */
@@ -419,10 +565,10 @@ async function pickFromListbox(trigger: HTMLElement, value: string, key: BlockKe
   }
 
   const option = options[i]!;
-  option.scrollIntoView?.({ block: "nearest" });
-  realClick(option);
-  await waitFor(() => !option.isConnected || !isVisible(option), 1000);
+  const field = trigger.closest('[data-automation-id^="formField-"]') ?? trigger;
+  const chosen = await chooseOption(option, i, field, trigger);
   simulateBlur(trigger); // som når brukeren går videre til neste felt
+  if (!chosen) return false;
   // Står knappen fortsatt på «Select One», ble valget ikke registrert.
   if (!(trigger instanceof HTMLInputElement) && PLACEHOLDER_TRIGGER.test(norm(trigger.textContent ?? ""))) return false;
   return true;
@@ -458,6 +604,7 @@ async function fillSearchInput(el: HTMLInputElement, terms: string[], key_: Bloc
     el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: v }));
   };
   await waitFor(() => visibleOptions(doc).length === 0, 800);
+  log("søkefelt", describeEl(el), "søkeord:", terms);
   for (const term of terms) {
     const stale = new Set(visibleOptions(doc));
     simulateFocus(el);
@@ -467,22 +614,24 @@ async function fillSearchInput(el: HTMLInputElement, terms: string[], key_: Bloc
       const fresh = visibleOptions(doc).filter((o) => !stale.has(o));
       return fresh.length ? fresh : null;
     }, 3000);
+    log(`søk «${term}»:`, options ? `${options.length} treff` : "ingen treff funnet");
     if (options) {
-      const texts = options.map((o) => ({ text: (o.textContent ?? "").trim() }));
+      const texts = options.map((o) => ({ text: optionLabel(o) }));
       // Fagfelt: godta også delvise treff («Computer Science and Engineering»).
       let i = bestOptionIndex(texts, term, 2);
       if (i < 0 && key_ === "field") i = bestOptionIndex(texts, term, 1);
       if (i >= 0) {
-        const option = options[i]!;
-        realClick(option);
-        await waitFor(() => !option.isConnected || !isVisible(option), 1000);
-        simulateBlur(el);
-        return true;
+        const field = el.closest('[data-automation-id^="formField-"]') ?? el.parentElement;
+        if (await chooseOption(options[i]!, i, field, el)) {
+          simulateBlur(el);
+          return true;
+        }
       }
     }
-    // Ingen treff: tøm feltet og lukk listen før neste søkeord.
+    // Ingen treff (eller valget ble ikke registrert): tøm feltet og lukk listen før neste søkeord.
     type("");
     key(el, "keydown", "Escape");
+    key(el, "keyup", "Escape");
     await waitFor(() => visibleOptions(doc).length === 0, 800);
   }
   simulateBlur(el);

@@ -609,3 +609,147 @@ describe("AI-søkeord for fagfelt", () => {
     expect(searched).toEqual(["Child Welfare", "Social Work"]);
   }, 15000);
 });
+
+describe("treff der klikket må treffe et element inni raden (Workday-søk)", () => {
+  it("velger treffet slik at det blir stående i feltet", async () => {
+    document.body.innerHTML = `
+      <div role="group"><h3>Education</h3>
+        <div class="block"><h4>Education 1</h4>
+          <div data-automation-id="formField-fieldOfStudy"><label for="fos">Field of Study</label>
+            <div class="pills"></div><input id="fos"><span data-automation-id="promptIcon"></span></div>
+        </div>
+        <button type="button">Add Another</button>
+      </div>`;
+    const input = document.getElementById("fos") as HTMLInputElement;
+    const pills = document.querySelector(".pills")!;
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !input.value) return;
+      document.querySelector("#results")?.remove();
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div id="results"><div role="option"><div data-automation-id="promptOption"><span>Engineering</span></div></div></div>`,
+      );
+      const results = document.getElementById("results")!;
+      const wire = () => {
+        // Klikk på raden selv gjør ingenting: bare det indre elementet velger.
+        const node = results.querySelector<HTMLElement>('[data-automation-id="promptOption"]')!;
+        node.addEventListener("click", () => {
+          if (!node.isConnected) return; // som React: gamle elementer reagerer ikke
+          pills.textContent = "Engineering";
+          input.value = "";
+          results.remove();
+        });
+      };
+      wire();
+      // Som Workday: hover tegner raden på nytt (ny node), men velger ikke.
+      results.addEventListener("mouseover", () => {
+        if (results.dataset.hovered) return;
+        results.dataset.hovered = "1";
+        results.innerHTML = results.innerHTML;
+        wire();
+      });
+    });
+    const p: FullProfile = {
+      ...profile,
+      educations: [{ school: "UiB", field_of_study: "Ingeniørvitenskap og IKT", field_of_study_en: ["Engineering"], sort_order: 0 }],
+    };
+    const report = await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(pills.textContent).toBe("Engineering");
+    expect(report.fields.find((f) => f.key === "educations")?.status).toBe("filled");
+  }, 15000);
+});
+
+describe("søkeliste der bare tastaturet velger (som Workday)", () => {
+  it("piler ned til riktig rad i rolig tempo og velger med Enter", async () => {
+    const SUBJECTS = ["Aerospace Engineering", "Chemical Engineering", "Civil Engineering", "Engineering", "Industrial Engineering"];
+    document.body.innerHTML = `
+      <div role="group"><h3>Education</h3>
+        <div class="block"><h4>Education 1</h4>
+          <div data-automation-id="formField-fieldOfStudy"><label for="fos">Field of Study</label>
+            <div class="pills"></div><input id="fos"><span data-automation-id="promptIcon"></span></div>
+        </div>
+        <button type="button">Add Another</button>
+      </div>`;
+    const input = document.getElementById("fos") as HTMLInputElement;
+    const pills = document.querySelector(".pills")!;
+    let active = -1;
+    let lastKey = 0;
+    const rows = () => Array.from(document.querySelectorAll<HTMLElement>("#results [role=option]"));
+    input.addEventListener("keydown", (e) => {
+      const now = Date.now();
+      if (e.key === "ArrowDown") {
+        // Trykk som kommer tettere enn 100 ms blir slått sammen (som React-batching i Workday).
+        if (now - lastKey < 100) return;
+        lastKey = now;
+        active = Math.min(active + 1, rows().length - 1);
+        rows().forEach((r, i) => r.setAttribute("aria-selected", String(i === active)));
+        return;
+      }
+      if (e.key !== "Enter") return;
+      if (active >= 0 && document.querySelector("#results")) {
+        pills.textContent = rows()[active]!.textContent;
+        input.value = "";
+        document.querySelector("#results")?.remove();
+        return;
+      }
+      if (!input.value) return;
+      document.querySelector("#results")?.remove();
+      active = -1;
+      const hits = SUBJECTS.filter((x) => x.toLowerCase().includes(input.value.toLowerCase()));
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div id="results">${hits.map((h) => `<div role="option" aria-selected="false"><span class="radio"></span>${h}</div>`).join("")}</div>`,
+      );
+    });
+    const p: FullProfile = {
+      ...profile,
+      educations: [{ school: "UiB", field_of_study: "Ingeniørvitenskap og IKT", field_of_study_en: ["Engineering"], sort_order: 0 }],
+    };
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(pills.textContent).toBe("Engineering");
+  }, 20000);
+});
+
+describe("Workday-treffrad: radioknapp og tekst er søsken (fra Inspiser 20. okt)", () => {
+  it("klikker radioknappen ved siden av teksten, ikke bare teksten", async () => {
+    const SUBJECTS = ["Aerospace Engineering", "Civil Engineering", "Engineering", "Industrial Engineering"];
+    document.body.innerHTML = `
+      <div role="group"><h3>Education</h3>
+        <div class="block"><h4>Education 1</h4>
+          <div data-automation-id="formField-fieldOfStudy"><label for="fos">Field of Study</label>
+            <div class="pills"></div><input id="fos"><span data-automation-id="promptIcon"></span>
+            <div class="popup"></div></div>
+        </div>
+        <button type="button">Add Another</button>
+      </div>`;
+    const input = document.getElementById("fos") as HTMLInputElement;
+    const pills = document.querySelector(".pills")!;
+    const popup = document.querySelector(".popup")!; // listen ligger inni feltet
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !input.value) return;
+      const hits = SUBJECTS.filter((x) => x.toLowerCase().includes(input.value.toLowerCase()));
+      popup.innerHTML = hits
+        .map(
+          (h, i) => `<div class="row">
+            <div class="css-s77mpk"><input type="radio" name="fos-radio" id="r${i}"></div>
+            <div id="promptOption-${i}" data-automation-id="promptOption" data-automation-label="${h}">${h}</div>
+          </div>`,
+        )
+        .join("");
+      // Bare radioknappen velger (håndteringen sitter der, ikke på teksten eller raden).
+      popup.querySelectorAll<HTMLInputElement>("input[type=radio]").forEach((r, i) => {
+        r.addEventListener("click", () => {
+          pills.innerHTML = `<div data-automation-id="selectedItem">${hits[i]}</div>`;
+          popup.innerHTML = "";
+          input.value = "";
+        });
+      });
+    });
+    const p: FullProfile = {
+      ...profile,
+      educations: [{ school: "UiB", field_of_study: "Ingeniørvitenskap og IKT", field_of_study_en: ["Engineering"], sort_order: 0 }],
+    };
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(pills.textContent).toBe("Engineering");
+  }, 20000);
+});
