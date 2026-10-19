@@ -30,7 +30,7 @@ function isCandidate(el: FillableElement): boolean {
   return isVisible(el);
 }
 
-function isVisible(el: Element): boolean {
+export function isVisible(el: Element): boolean {
   // jsdom har ingen layout; der regner vi alt som synlig.
   if (typeof navigator !== "undefined" && navigator.userAgent.includes("jsdom")) return true;
   const style = getComputedStyle(el);
@@ -60,7 +60,7 @@ function labelText(el: FillableElement): string {
 }
 
 /** Labeltekst uten verdier fra kontroller inni (f.eks. <select> inne i <label>). */
-function labelWithoutControls(label: Element): string {
+export function labelWithoutControls(label: Element): string {
   const clone = label.cloneNode(true) as HTMLElement;
   clone.querySelectorAll("input, select, textarea, option").forEach((n) => n.remove());
   return clone.textContent ?? "";
@@ -136,25 +136,49 @@ function isPlaceholderOption(opt: HTMLOptionElement | undefined): boolean {
 }
 
 /** Sett verdi slik at React/Angular/Vue registrerer endringen. */
+/**
+ * Fokus inn i feltet, som når brukeren klikker i det.
+ * Mens popupen er åpen har ikke siden fokus, så el.focus() fyrer ingen hendelser. Skjemaer som
+ * Workday merker da aldri feltet som «besøkt» og viser «required»-feil. Derfor sender vi dem selv.
+ */
+export function simulateFocus(el: HTMLElement) {
+  el.focus?.({ preventScroll: true });
+  el.dispatchEvent(new FocusEvent("focus"));
+  el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+}
+
+/** Fokus ut av feltet. Det er her mange skjemaer lagrer og validerer verdien. */
+export function simulateBlur(el: HTMLElement) {
+  el.dispatchEvent(new FocusEvent("blur"));
+  el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  el.blur?.();
+}
+
 export function setTextValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-  el.focus({ preventScroll: true });
+  simulateFocus(el);
+  // Native setter, så React sin verdisporing ser endringen.
   if (setter) setter.call(el, value);
   else el.value = value;
-  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
-  el.dispatchEvent(new Event("blur", { bubbles: true }));
-  el.blur();
+  simulateBlur(el);
 }
 
 const ALIASES: Record<string, string[]> = {
   norge: ["norway", "no", "nor", "noreg"],
+  // Grader: norsk profil, ofte engelske alternativer.
+  videregående: ["high school", "upper secondary", "secondary school"],
+  doktorgrad: ["phd", "ph d", "doctorate", "doctoral"],
+  mastergrad: ["master"],
+  bachelorgrad: ["bachelor"],
+  årsstudium: ["one year", "certificate"],
   sverige: ["sweden", "se", "swe"],
   danmark: ["denmark", "dk", "dnk"],
 };
 
-const norm = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+export const norm = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 /**
  * Finn alternativet som passer best med verdien (eksakt > starter med > inneholder).
@@ -162,7 +186,7 @@ const norm = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p
  */
 export function bestOptionIndex(options: { text: string; value?: string }[], value: string, minScore = 1): number {
   const target = norm(value);
-  const candidates = [target, ...(ALIASES[target] ?? [])];
+  const candidates = [target, ...(ALIASES[target] ?? []), ...(ALIASES[target.split(" ")[0] ?? ""] ?? [])];
   const score = (o: { text: string; value?: string }) => {
     const t = norm(o.text);
     const v = norm(o.value ?? "");
@@ -172,6 +196,10 @@ export function bestOptionIndex(options: { text: string; value?: string }[], val
     for (const c of candidates) {
       if (c.length >= 3 && t.length >= 3 && (t.startsWith(c) || c.startsWith(t))) return 2;
     }
+    // Første ord: «Master i informatikk» passer med «Master's Degree».
+    const [first] = target.split(" ");
+    const [optFirst] = t.split(" ");
+    if (first && optFirst && first.length >= 4 && optFirst.length >= 4 && (first.startsWith(optFirst) || optFirst.startsWith(first))) return 2;
     for (const c of candidates) {
       if (c.length >= 4 && t.includes(c)) return 1;
     }
@@ -196,10 +224,12 @@ export function setSelectValue(el: HTMLSelectElement, value: string): boolean {
   const best = options[i];
   if (!best) return false;
   const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+  simulateFocus(el);
   if (setter) setter.call(el, best.value);
   else el.value = best.value;
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
+  simulateBlur(el);
   return true;
 }
 
@@ -288,11 +318,13 @@ export function scanChoiceGroups(doc: Document): ChoiceGroup[] {
 
 /** Krysser av som en bruker ville gjort, så rammeverkene får med seg endringen. */
 export function checkOption(el: HTMLInputElement) {
+  simulateFocus(el);
   if (!el.checked) el.click();
+  simulateBlur(el);
 }
 
 export function setContentEditable(el: HTMLElement, value: string) {
-  el.focus({ preventScroll: true });
+  simulateFocus(el);
   const selection = el.ownerDocument.getSelection();
   if (selection) {
     selection.selectAllChildren(el);
@@ -303,7 +335,7 @@ export function setContentEditable(el: HTMLElement, value: string) {
     el.textContent = value;
     el.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
   }
-  el.blur();
+  simulateBlur(el);
 }
 
 export function setFileValue(el: HTMLInputElement, file: File): boolean {

@@ -1,4 +1,5 @@
 import type { FieldKey, FullProfile } from "@soknadsprofil/shared";
+import type { SectionKind } from "./engine/sections";
 
 export type FileKey = Extract<FieldKey, "cvFile" | "coverLetterFile" | "diplomaFile">;
 
@@ -18,7 +19,8 @@ export interface FillPayload {
 export type FieldStatus = "filled" | "uncertain" | "skipped-has-value" | "no-value" | "failed";
 
 export interface FieldReport {
-  key: FieldKey;
+  /** Felttype, eller en gjentakende seksjon (arbeidserfaring, utdanning, verv). */
+  key: FieldKey | SectionKind;
   label: string;
   confidence: number;
   status: FieldStatus;

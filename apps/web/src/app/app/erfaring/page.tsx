@@ -72,7 +72,11 @@ export default function ErfaringPage() {
           title={(r) => s(r.school) ?? ""}
           subtitle={(r) => [s(r.degree), s(r.field_of_study), s(r.location)].filter(Boolean).join(" · ")}
           meta={period}
-          body={(r) => s(r.description)}
+          body={(r) => {
+            // Engelske søkeord laget av AI, så brukeren ser hva extensionen søker etter i engelske skjemaer.
+            const en = Array.isArray(r.field_of_study_en) ? (r.field_of_study_en as string[]).join(", ") : "";
+            return [s(r.description), en && `På engelsk: ${en}`].filter(Boolean).join(" · ") || undefined;
+          }}
           fields={[
             { name: "school", label: "Skole / lærested", wide: true },
             { name: "degree", label: "Grad", placeholder: "F.eks. Bachelor" },

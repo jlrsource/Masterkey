@@ -1,5 +1,5 @@
 import { browser } from "wxt/browser";
-import { brandMarkSvg, FIELD_LABELS } from "@soknadsprofil/shared";
+import { brandMarkSvg } from "@soknadsprofil/shared";
 import { CheckCircle2, ExternalLink, Eraser, Loader2, LogOut, RefreshCw, TriangleAlert, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { sendToBackground, type ExtState } from "@/lib/messages";
@@ -83,7 +83,7 @@ export function App() {
     ...new Set(
       (result?.fields ?? [])
         .filter((f) => f.status === status && !fields.some((x) => x.key === f.key))
-        .map((f) => FIELD_LABELS[f.key]),
+        .map((f) => f.label),
     ),
   ];
   const missing = notFilled("no-value");
@@ -156,7 +156,7 @@ export function App() {
                     key={`${f.key}-${i}`}
                     className={`rounded-full px-2 py-0.5 text-[11px] ${f.status === "filled" ? "bg-success/15 text-success" : "bg-warning/20"}`}
                   >
-                    {FIELD_LABELS[f.key]}
+                    {f.label}
                   </li>
                 ))}
               </ul>

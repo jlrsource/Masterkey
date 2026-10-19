@@ -32,6 +32,8 @@ const cases: [string, FieldDescriptor, FieldKey | null][] = [
   ["snittkarakter", { tag: "textarea", label: "Kva er din snittkarakter? *" }, "grade"],
   ["karaktersnitt", input({ label: "Karaktersnitt" }), "grade"],
   ["bosted er fortsatt by", input({ label: "By" }), "city"],
+  ["web address er nettside", input({ id: "webAddress--123", label: "URL*" }), "website"],
+  ["adresse er fortsatt adresse", input({ label: "Adresse" }), "address"],
   // Engelske labels
   ["first name", input({ label: "First name" }), "firstName"],
   ["last name", input({ label: "Last Name" }), "lastName"],

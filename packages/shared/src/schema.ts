@@ -54,6 +54,9 @@ export const educationSchema = z.object({
   school: z.string().trim().min(1, "Skole må fylles ut"),
   degree: optionalText,
   field_of_study: optionalText,
+  /** Engelske søkeord for fagfeltet, laget av AI. Mest presist først. */
+  field_of_study_en: z.array(z.string()).nullish(),
+  field_of_study_en_source: optionalText,
   location: optionalText,
   start_date: optionalDate,
   end_date: optionalDate,

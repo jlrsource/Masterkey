@@ -78,6 +78,30 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
+  /**
+   * Lager engelske søkeord for fagfeltet i bakgrunnen (brukes av extensionen i engelske skjemaer).
+   * Serveren hopper over utdanninger der fagfeltet ikke har endret seg. Feil ignoreres stille:
+   * extensionen har en innebygd oversettelsesliste som reserve.
+   */
+  const translateEducation = useCallback(async (id: string) => {
+    try {
+      const res = await fetch("/api/education/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ educationId: id }),
+      });
+      if (!res.ok) return;
+      const { terms } = (await res.json()) as { terms: string[] | null };
+      setProfile((p) => ({
+        ...p,
+        educations: p.educations.map((e) => (e.id === id ? { ...e, field_of_study_en: terms } : e)),
+      }));
+      notifyProfileUpdated();
+    } catch {
+      // Ingen nett eller ingen API-nøkkel: extensionen bruker reservelisten.
+    }
+  }, []);
+
   const reload = useCallback(async () => {
     const [{ data: userData }, { data, error }] = await Promise.all([
       supabase.auth.getUser(),
@@ -90,10 +114,15 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     } else {
       const parsed = fullProfileSchema.safeParse(data);
       if (!parsed.success) console.warn("Profilen matchet ikke skjemaet", parsed.error.issues);
-      setProfile(parsed.success ? parsed.data : { ...emptyProfile(), ...(data as Partial<FullProfile>) });
+      const loaded = parsed.success ? parsed.data : { ...emptyProfile(), ...(data as Partial<FullProfile>) };
+      setProfile(loaded);
+      // Utdanninger fra før denne funksjonen fantes: oversett fagfeltet én gang.
+      for (const e of loaded.educations) {
+        if (e.id && e.field_of_study && !e.field_of_study_en) void translateEducation(e.id);
+      }
     }
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, translateEducation]);
 
   useEffect(() => {
     void reload();
@@ -126,9 +155,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         const next = isNew ? [...list, saved] : list.map((r) => ((r as { id?: string }).id === id ? saved : r));
         return { ...p, [table]: next };
       });
+      if (table === "educations" && typeof saved.id === "string") void translateEducation(saved.id);
       return saved as Row<typeof table>;
     },
-    [supabase],
+    [supabase, translateEducation],
   );
 
   const deleteRow = useCallback<ProfileContextValue["deleteRow"]>(

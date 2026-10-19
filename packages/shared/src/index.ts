@@ -8,3 +8,6 @@ export * from "./bridge";
 export * from "./cvExtraction";
 export * from "./cvMerge";
 export * from "./brand";
+export * from "./degree";
+export * from "./languageMatch";
+export * from "./fieldOfStudy";

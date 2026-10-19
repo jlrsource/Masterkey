@@ -40,7 +40,7 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   country: ["land", "country", "nasjonalitet"],
   birthDate: ["fødselsdato", "fodselsdato", "født", "birth date", "date of birth", "birthdate", "dob", "birthday"],
   linkedin: ["linkedin", "linked in", "linkedin url", "linkedin profil", "linkedin profile"],
-  website: ["nettside", "hjemmeside", "portefølje", "portfolio", "website", "personal website", "web site", "homepage"],
+  website: ["nettside", "hjemmeside", "portefølje", "portfolio", "website", "personal website", "web site", "homepage", "url", "web address", "webadresse", "nettadresse"],
   github: ["github", "git hub", "github url", "github profile"],
   headline: ["overskrift", "headline", "profesjonell tittel", "professional title"],
   summary: ["sammendrag", "om deg", "om meg", "kort om deg", "beskriv deg selv", "summary", "about you", "about me", "profile summary", "bio"],
@@ -76,6 +76,8 @@ const NON_CV_DOCUMENTS = [
 export const NEGATIVE_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
   fullName: ["fornavn", "etternavn", "first", "last", "company", "firma", "bedrift", "skole", "school", "referanse", "reference", "user name", "username", "brukernavn"],
   email: ["referanse", "reference"],
+  // «Web address»/URL er en nettside, ikke en postadresse.
+  address: ["url", "web", "website", "nettside", "nett", "e post", "email", "mail", "ip"],
   phone: ["referanse", "reference"],
   city: ["fødested", "birth", "referred", "henvist", "funnet", "hørte", "student", "studerer", "study"],
   country: ["telefon", "phone", "code"],

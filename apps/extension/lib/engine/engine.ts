@@ -9,6 +9,7 @@ import {
 } from "@soknadsprofil/shared";
 import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } from "../types";
 import { findAdapter } from "./adapters";
+import { fillRepeatingSections } from "./sections";
 import {
   bestOptionIndex,
   checkOption,
@@ -80,9 +81,15 @@ function base64ToFile(f: FilePayload): File {
 const MULTI_ALLOWED: FieldKey[] = ["email"];
 
 export async function fillDocument(payload: FillPayload, doc: Document = document): Promise<FrameReport> {
-  const { matches, adapter, unrecognized } = classifyDocument(doc);
+  // Gjentakende seksjoner først: de klikker «Legg til» og fyller hver blokk med sin egen oppføring.
+  const sections = await fillRepeatingSections(payload, doc);
+  const fields: FieldReport[] = [...sections.fields];
+
+  const classified = classifyDocument(doc);
+  const { adapter } = classified;
+  const matches = classified.matches.filter((m) => !sections.handled.has(m.el));
+  const unrecognized = classified.unrecognized;
   const used = new Set<FieldKey>();
-  const fields: FieldReport[] = [];
 
   // Sikreste treff først, så de vinner hvis flere felt matcher samme nøkkel.
   matches.sort((a, b) => b.result.confidence - a.result.confidence);
@@ -135,7 +142,7 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   const groups = fillChoiceGroups(payload, doc);
   fields.push(...groups.fields);
 
-  return { url: doc.location?.href ?? "", adapter, detected: matches.length + groups.detected, fields, unrecognized };
+  return { url: doc.location?.href ?? "", adapter, detected: matches.length + groups.detected + sections.fields.length, fields, unrecognized };
 }
 
 /** Avkrysningsbokser og radioknapper: kryss av alternativet som passer med profilen. */
