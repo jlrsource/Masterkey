@@ -9,3 +9,6 @@ dist
 *.tsbuildinfo
 test-results
 playwright-report
+
+# Benchmark-resultater (skjermbilder og HTML-kopier av tredjepartssider)
+apps/extension/e2e/results/

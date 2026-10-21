@@ -1,0 +1,43 @@
+{
+  "personal": {
+    "first_name": "Kari",
+    "last_name": "Nordmann",
+    "email": "kari.nordmann.test@example.com",
+    "phone": "+47 912 34 567",
+    "address": "Storgata 1",
+    "postal_code": "0155",
+    "city": "Oslo",
+    "country": "Norge",
+    "birth_date": "1998-04-17",
+    "linkedin_url": "https://www.linkedin.com/in/kari-nordmann-test",
+    "website_url": "https://kari-nordmann.example.com",
+    "github_url": "https://github.com/kari-nordmann-test",
+    "headline": "Software Engineer",
+    "summary": "Utvikler med erfaring fra produktutvikling og en mastergrad i informatikk. Liker å bygge løsninger som gjør hverdagen enklere for folk."
+  },
+  "experiences": [
+    { "id": "00000000-0000-4000-8000-000000000001", "title": "Software Engineer", "employer": "Fjord Tech AS", "location": "Oslo", "start_date": "2023-08-01", "end_date": null, "is_current": true, "description": "Utvikling av webapplikasjoner i React og TypeScript.", "sort_order": 0 },
+    { "id": "00000000-0000-4000-8000-000000000002", "title": "Sommerintern", "employer": "Nordic Bank ASA", "location": "Bergen", "start_date": "2022-06-01", "end_date": "2022-08-01", "is_current": false, "description": "Dataanalyse og automatisering.", "sort_order": 1 }
+  ],
+  "volunteering": [],
+  "educations": [
+    { "id": "00000000-0000-4000-8000-000000000003", "school": "Universitetet i Oslo", "degree": "Master", "field_of_study": "Informatikk", "field_of_study_en": ["Computer Science"], "location": "Oslo", "start_date": "2021-08-01", "end_date": "2023-06-01", "grade": "B", "description": null, "sort_order": 0 }
+  ],
+  "certifications": [],
+  "skills": [
+    { "id": "00000000-0000-4000-8000-000000000004", "name": "TypeScript", "level": "advanced", "sort_order": 0 },
+    { "id": "00000000-0000-4000-8000-000000000005", "name": "React", "level": "advanced", "sort_order": 1 }
+  ],
+  "languages": [
+    { "id": "00000000-0000-4000-8000-000000000006", "language": "Norsk", "spoken_level": "native", "written_level": "native", "sort_order": 0 },
+    { "id": "00000000-0000-4000-8000-000000000007", "language": "Engelsk", "spoken_level": "fluent", "written_level": "fluent", "sort_order": 1 }
+  ],
+  "references": [],
+  "saved_answers": [
+    { "id": "00000000-0000-4000-8000-000000000008", "question": "Lønnskrav", "answer": "Etter avtale", "tags": ["lønnskrav"] },
+    { "id": "00000000-0000-4000-8000-000000000009", "question": "Oppstart", "answer": "Tre måneders oppsigelsestid", "tags": ["oppstart"] }
+  ],
+  "documents": [
+    { "id": "00000000-0000-4000-8000-00000000000a", "type": "cv", "file_name": "Kari_Nordmann_CV.pdf", "storage_path": "test/cv.pdf", "mime_type": "application/pdf", "size_bytes": 900, "is_default": true }
+  ]
+}

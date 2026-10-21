@@ -1,12 +1,18 @@
 import {
+  bestDegreeOptionIndex,
   classifyField,
+  englishCountry,
   FIELD_LABELS,
+  fieldOfStudySearchTerms,
   formatDateForInput,
   HIGH_CONFIDENCE,
+  latestEducation,
   resolveValue,
   type Classification,
   type FieldKey,
+  type FullProfile,
 } from "@soknadsprofil/shared";
+import { fillSearchInput, isSearchInput, pickFromListbox } from "./picker";
 import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } from "../types";
 import { findAdapter } from "./adapters";
 import { fillRepeatingSections } from "./sections";
@@ -70,6 +76,42 @@ export function classifyDocument(
   return { matches, adapter: adapter?.name ?? null, unrecognized };
 }
 
+/**
+ * Søkeord for et søkefelt, i rekkefølge. Mange lister er på engelsk, så land oversettes,
+ * sted prøves også med land («Oslo, Norway»), og fagfelt bruker AI-søkeordene fra profilen.
+ */
+function searchTermsFor(key: FieldKey, value: string, profile: FullProfile): string[] {
+  const uniq = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((x): x is string => Boolean(x?.trim())))];
+  const country = profile.personal?.country;
+  switch (key) {
+    case "country":
+      return uniq([englishCountry(value), value]);
+    case "city":
+    case "studyCity":
+      return uniq([value, `${value}, ${englishCountry(country) ?? country ?? ""}`.replace(/, $/, "")]);
+    case "fieldOfStudy":
+      return uniq([...(latestEducation(profile)?.field_of_study_en ?? []), ...fieldOfStudySearchTerms(value)]);
+    default:
+      return [value];
+  }
+}
+
+/** Velger riktig alternativ i en liste for en felttype. */
+function optionMatcher(key: FieldKey, value: string, profile: FullProfile) {
+  return (texts: string[]) => {
+    if (key === "degree") {
+      const edu = latestEducation(profile);
+      const i = bestDegreeOptionIndex(texts, value, [edu?.field_of_study, edu?.school].filter(Boolean).join(" "));
+      if (i >= 0) return i;
+    }
+    for (const term of searchTermsFor(key, value, profile)) {
+      const i = bestOptionIndex(texts.map((text) => ({ text })), term, 2);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+}
+
 function base64ToFile(f: FilePayload): File {
   const bin = atob(f.base64);
   const bytes = new Uint8Array(bin.length);
@@ -78,7 +120,7 @@ function base64ToFile(f: FilePayload): File {
 }
 
 /** Ett felt per type for de fleste nøkler. Unntaket er e-post, der «bekreft e-post» også skal fylles. */
-const MULTI_ALLOWED: FieldKey[] = ["email"];
+const MULTI_ALLOWED: FieldKey[] = ["email", "country"];
 
 export async function fillDocument(payload: FillPayload, doc: Document = document): Promise<FrameReport> {
   // Gjentakende seksjoner først: de klikker «Legg til» og fyller hver blokk med sin egen oppføring.
@@ -116,7 +158,18 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
         const file = payload.files[key as keyof FillPayload["files"]];
         if (el instanceof HTMLInputElement && el.type === "file" && file) ok = setFileValue(el, base64ToFile(file));
       } else if (el instanceof HTMLSelectElement) {
-        ok = setSelectValue(el, value.value);
+        const options = Array.from(el.options);
+        const i = optionMatcher(key, value.value, payload.profile)(options.map((o) => o.text));
+        ok = i >= 0 ? setSelectValue(el, options[i]!.text) : setSelectValue(el, value.value);
+      } else if (el instanceof HTMLInputElement && isSearchInput(el)) {
+        // Søkefelt (react-select, autocomplete …): skriv, vent på treff og velg fra listen.
+        ok = await fillSearchInput(el, searchTermsFor(key, value.value, payload.profile), {
+          loose: key === "fieldOfStudy",
+          fallbackText: value.value,
+        });
+      } else if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) {
+        // Egendefinert nedtrekksliste (knapp som åpner en liste).
+        ok = await pickFromListbox(el, optionMatcher(key, value.value, payload.profile));
       } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         const text = key === "birthDate" ? formatDateForInput(value.value, (el as HTMLInputElement).type) : value.value;
         setTextValue(el, text);

@@ -2,7 +2,8 @@ import type { FieldDescriptor } from "@soknadsprofil/shared";
 
 export type FillableElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLElement;
 
-const SELECTOR = 'input:not([type="radio"]):not([type="checkbox"]), textarea, select, [contenteditable="true"], [contenteditable=""]';
+const SELECTOR =
+  'input:not([type="radio"]):not([type="checkbox"]), textarea, select, [contenteditable="true"], [contenteditable=""], button[aria-haspopup="listbox"], [role="combobox"]:not(input)';
 const CHOICE_SELECTOR = 'input[type="radio"], input[type="checkbox"]';
 const MAX_TEXT = 160;
 /** Alle typer skjemafelt, brukt for å avgjøre hvor ett felt sin «boks» slutter. */
@@ -104,8 +105,9 @@ function nearbyText(el: Element): string {
 
 export function describeField(el: FillableElement): FieldDescriptor {
   const root = el.getRootNode() as Document | ShadowRoot;
+  const isDropdown = !(el instanceof HTMLInputElement) && (el.getAttribute("aria-haspopup") === "listbox" || el.getAttribute("role") === "combobox");
   const tag: FieldDescriptor["tag"] =
-    el instanceof HTMLInputElement ? "input" : el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement ? "select" : "contenteditable";
+    el instanceof HTMLInputElement ? "input" : el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement || isDropdown ? "select" : "contenteditable";
   const isFile = el instanceof HTMLInputElement && el.type === "file";
   const ownLabel = labelText(el);
   return {
@@ -124,6 +126,11 @@ export function describeField(el: FillableElement): FieldDescriptor {
 }
 
 export function hasValue(el: FillableElement): boolean {
+  // Egendefinert nedtrekksliste: tom så lenge den viser «Select One»/«Velg …».
+  if (!(el instanceof HTMLInputElement) && (el.getAttribute("aria-haspopup") === "listbox" || el.getAttribute("role") === "combobox")) {
+    const t = (el.textContent ?? "").trim();
+    return Boolean(t) && !/^(select|velg|choose|vel)\b/i.test(t);
+  }
   if (el instanceof HTMLInputElement && el.type === "file") return (el.files?.length ?? 0) > 0;
   if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 || (el.selectedIndex === 0 && el.value !== "" && !isPlaceholderOption(el.options[0]));
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value.trim() !== "";
@@ -178,6 +185,9 @@ const ALIASES: Record<string, string[]> = {
   danmark: ["denmark", "dk", "dnk"],
 };
 
+/** Ord som starter mange navn og derfor ikke sier noe om likhet. */
+const GENERIC_FIRST_WORDS = /^(universit|college|høgsk|school|skole|the$|institut|academ|akadem|norges$|det$|den$|national|international|centre|center|department|faculty)/;
+
 export const norm = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 /**
@@ -196,10 +206,15 @@ export function bestOptionIndex(options: { text: string; value?: string }[], val
     for (const c of candidates) {
       if (c.length >= 3 && t.length >= 3 && (t.startsWith(c) || c.startsWith(t))) return 2;
     }
-    // Første ord: «Master i informatikk» passer med «Master's Degree».
+    // Første ord: «Master i informatikk» passer med «Master's Degree». Men ikke vanlige ord som
+    // «Universitetet i Oslo» mot «Université Catholique de Louvain».
     const [first] = target.split(" ");
     const [optFirst] = t.split(" ");
-    if (first && optFirst && first.length >= 4 && optFirst.length >= 4 && (first.startsWith(optFirst) || optFirst.startsWith(first))) return 2;
+    if (
+      first && optFirst && first.length >= 4 && optFirst.length >= 4 &&
+      !GENERIC_FIRST_WORDS.test(first) && !GENERIC_FIRST_WORDS.test(optFirst) &&
+      (first.startsWith(optFirst) || optFirst.startsWith(first))
+    ) return 2;
     for (const c of candidates) {
       if (c.length >= 4 && t.includes(c)) return 1;
     }

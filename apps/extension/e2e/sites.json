@@ -1,0 +1,47 @@
+{
+  "_comment": "Søknadsskjemaer å teste. «resolve» henter en aktiv annonse automatisk fra plattformens offentlige API. «url» er en fast adresse (f.eks. norske plattformer). Legg til flere etter samme mønster.",
+  "sites": [
+    {
+      "name": "Greenhouse (GitLab)",
+      "platform": "greenhouse",
+      "resolve": {
+        "greenhouse": "gitlab"
+      }
+    },
+    {
+      "name": "Lever (Palantir)",
+      "platform": "lever",
+      "resolve": {
+        "lever": "palantir"
+      }
+    },
+    {
+      "name": "Ashby (Ashby)",
+      "platform": "ashby",
+      "resolve": {
+        "ashby": "ashby"
+      }
+    },
+    {
+      "name": "SmartRecruiters (Ubisoft)",
+      "platform": "smartrecruiters",
+      "resolve": {
+        "smartrecruiters": "Ubisoft2"
+      }
+    },
+    {
+      "name": "Greenhouse (Airbnb)",
+      "platform": "greenhouse",
+      "resolve": {
+        "greenhouse": "airbnb"
+      }
+    },
+    {
+      "name": "Lever (Spotify)",
+      "platform": "lever",
+      "resolve": {
+        "lever": "spotify"
+      }
+    }
+  ]
+}
