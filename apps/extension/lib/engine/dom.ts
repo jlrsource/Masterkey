@@ -137,9 +137,85 @@ export function hasValue(el: FillableElement): boolean {
   return (el.textContent ?? "").trim() !== "";
 }
 
+/** «Velg …» på flere språk (norsk, dansk, svensk, engelsk, tysk, fransk, spansk, italiensk, nederlandsk). */
+export const PLACEHOLDER_WORDS = /velg|vælg|välj|vel\b|choose|select|please|wähle|wählen|auswählen|choisi|sélection|selecciona|seleziona|kies|--/i;
+
 function isPlaceholderOption(opt: HTMLOptionElement | undefined): boolean {
   if (!opt) return true;
-  return opt.value === "" || /velg|choose|select|--/i.test(opt.text);
+  return opt.value === "" || PLACEHOLDER_WORDS.test(opt.text);
+}
+
+/**
+ * Ligger feltet i en innloggingsboks? Det er tilfellet når den minste boksen rundt feltet som også
+ * har et passordfelt, er liten (høyst fire felt, f.eks. e-post + passord). Går aldri utenfor sitt
+ * eget <form>, så et søknadsskjema på samme side som en innlogging ikke blir hoppet over.
+ */
+export function inLoginForm(el: Element): boolean {
+  let node = el.parentElement;
+  for (let depth = 0; node && depth < 8; depth++) {
+    if (node.querySelector('input[type="password"]')) {
+      const fields = node.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]), select, textarea');
+      return fields.length <= 4;
+    }
+    if (node.tagName === "FORM") return false;
+    node = node.parentElement;
+  }
+  return false;
+}
+
+type DatePart = "year" | "month" | "day";
+
+const MONTH_NAMES = /^(jan|feb|mar|apr|mai|may|jun|jul|aug|sep|okt|oct|nov|des|dec)/i;
+
+/** Hvilken del av en dato en nedtrekksliste er, ut fra alternativene (årstall, 1–12/månedsnavn, 1–31). */
+function selectDatePart(sel: HTMLSelectElement): DatePart | null {
+  const opts = Array.from(sel.options).filter((o) => !isPlaceholderOption(o)).map((o) => o.text.trim());
+  if (opts.length < 2) return null;
+  const nums = opts.map((t) => Number(t)).filter((n) => Number.isInteger(n));
+  if (nums.length >= opts.length * 0.8) {
+    if (nums.every((n) => n >= 1900 && n <= 2100)) return "year";
+    const max = Math.max(...nums);
+    if (max <= 12 && opts.length <= 12) return "month";
+    if (max <= 31 && opts.length >= 28) return "day";
+  }
+  if (opts.filter((t) => MONTH_NAMES.test(t)).length >= 10) return "month";
+  return null;
+}
+
+/**
+ * Datoer delt i flere nedtrekkslister (år/måned/dag). Finner listene i samme lille gruppe som
+ * `el`, avgjør hvilken del hver er ut fra alternativene, og fyller alle. Returnerer antall fylt.
+ */
+export function fillDateSelects(el: HTMLSelectElement, iso: string): number {
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return 0;
+  let group: Element | null = el.parentElement;
+  for (let depth = 0; group && depth < 4; depth++) {
+    const selects = group.querySelectorAll("select");
+    if (selects.length >= 2 || group.querySelectorAll("input:not([type=hidden]), textarea").length > 0) break;
+    group = group.parentElement;
+  }
+  const selects = group ? Array.from(group.querySelectorAll("select")) : [el];
+  if (selects.length > 4) return 0; // for stor gruppe, sannsynligvis ikke en dato
+  let filled = 0;
+  for (const sel of selects.length ? selects : [el]) {
+    const part = selectDatePart(sel);
+    if (!part) continue;
+    const want = part === "year" ? y : part === "month" ? m : d;
+    const opts = Array.from(sel.options);
+    const monthIndex = Number(m) - 1;
+    const option =
+      opts.find((o) => Number(o.text.trim()) === Number(want) || Number(o.value) === Number(want)) ??
+      (part === "month" ? opts.filter((o) => MONTH_NAMES.test(o.text.trim()))[monthIndex] : undefined);
+    if (!option) continue;
+    simulateFocus(sel);
+    sel.value = option.value;
+    sel.dispatchEvent(new Event("input", { bubbles: true }));
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    simulateBlur(sel);
+    filled++;
+  }
+  return filled;
 }
 
 /** Sett verdi slik at React/Angular/Vue registrerer endringen. */

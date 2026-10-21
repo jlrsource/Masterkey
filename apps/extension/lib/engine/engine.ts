@@ -1,6 +1,8 @@
 import {
   bestDegreeOptionIndex,
   classifyField,
+  countryIso2,
+  dialCode,
   englishCountry,
   FIELD_LABELS,
   fieldOfStudySearchTerms,
@@ -20,6 +22,8 @@ import {
   bestOptionIndex,
   checkOption,
   clearHighlights,
+  fillDateSelects,
+  inLoginForm,
   describeField,
   hasValue,
   highlight,
@@ -35,6 +39,13 @@ import {
 interface Match {
   el: FillableElement;
   result: Classification;
+}
+
+/** En liste med retningsnumre («NO +47», «+46 Sverige» …) er en landskode-liste, uansett label. */
+function isDialCodeSelect(el: Element): boolean {
+  if (!(el instanceof HTMLSelectElement) || el.options.length < 5) return false;
+  const withDial = Array.from(el.options).filter((o) => /\+\d{1,4}\b/.test(o.text)).length;
+  return withDial >= el.options.length * 0.6;
 }
 
 /** Klassifiser alle felt i dokumentet. Adapter-regler går foran den generiske klassifisereren. */
@@ -57,9 +68,11 @@ export function classifyDocument(
   const unclassifiedFiles: HTMLInputElement[] = [];
   let fileInputs = 0;
   for (const el of scanFields(doc)) {
+    // Innloggingsbokser («Log ind», e-post + passord) hører ikke til søknaden.
+    if (inLoginForm(el)) continue;
     const isFile = el instanceof HTMLInputElement && el.type === "file";
     if (isFile) fileInputs++;
-    const override = overrides.get(el);
+    const override = overrides.get(el) ?? (isDialCodeSelect(el) ? "country" : undefined);
     const descriptor = describeField(el);
     const result = override ? { key: override, confidence: 1 } : classifyField(descriptor);
     if (result) matches.push({ el, result });
@@ -96,9 +109,47 @@ function searchTermsFor(key: FieldKey, value: string, profile: FullProfile): str
   }
 }
 
+/** Alternativet med et tallintervall som inneholder `n` («0–2 år», «3-5», «10+ years»), eller -1. */
+function rangeOptionIndex(texts: string[], n: number): number {
+  return texts.findIndex((t) => {
+    const nums = (t.match(/\d+/g) ?? []).map(Number);
+    if (!nums.length) return false;
+    if (/\+|over|mer enn|more than|or more|eller mer/i.test(t)) return n >= nums[0]!;
+    if (/under|mindre enn|less than|fewer than/i.test(t)) return n < nums[0]!;
+    if (nums.length >= 2) return n >= nums[0]! && n <= nums[1]!;
+    return n === nums[0];
+  });
+}
+
+/**
+ * Landskode-lister for telefon («NO +47», «+47 Norway», «Norway (+47)»): velg ut fra retningsnummeret
+ * i profilens telefonnummer, ellers landets ISO-kode. Bare når listen faktisk har retningsnumre.
+ */
+function countryCodeOptionIndex(texts: string[], country: string, profile: FullProfile): number {
+  if (!texts.some((t) => /\+\d{1,4}\b/.test(t))) return -1;
+  const dial = dialCode(profile.personal?.phone) ?? (countryIso2(country) === "NO" ? "47" : null);
+  const iso = countryIso2(country);
+  const name = englishCountry(country) ?? country;
+  const hasDial = (t: string) => dial !== null && new RegExp(`\\+${dial}(?!\\d)`).test(t);
+  // Flere land kan dele retningsnummer (+1, +47 for Svalbard): foretrekk ISO-kode/navn i tillegg.
+  const both = texts.findIndex((t) => hasDial(t) && ((iso && new RegExp(`\\b${iso}\\b`).test(t)) || t.toLowerCase().includes(name.toLowerCase()) || t.toLowerCase().includes(country.toLowerCase())));
+  if (both >= 0) return both;
+  const byDial = texts.findIndex(hasDial);
+  if (byDial >= 0) return byDial;
+  return iso ? texts.findIndex((t) => new RegExp(`^\\s*${iso}\\b`).test(t)) : -1;
+}
+
 /** Velger riktig alternativ i en liste for en felttype. */
 function optionMatcher(key: FieldKey, value: string, profile: FullProfile) {
   return (texts: string[]) => {
+    if (key === "yearsExperience") {
+      const i = rangeOptionIndex(texts, Number(value));
+      if (i >= 0) return i;
+    }
+    if (key === "country") {
+      const i = countryCodeOptionIndex(texts, value, profile);
+      if (i >= 0) return i;
+    }
     if (key === "degree") {
       const edu = latestEducation(profile);
       const i = bestDegreeOptionIndex(texts, value, [edu?.field_of_study, edu?.school].filter(Boolean).join(" "));
@@ -120,7 +171,7 @@ function base64ToFile(f: FilePayload): File {
 }
 
 /** Ett felt per type for de fleste nøkler. Unntaket er e-post, der «bekreft e-post» også skal fylles. */
-const MULTI_ALLOWED: FieldKey[] = ["email", "country"];
+const MULTI_ALLOWED: FieldKey[] = ["email", "country", "city"];
 
 export async function fillDocument(payload: FillPayload, doc: Document = document): Promise<FrameReport> {
   // Gjentakende seksjoner først: de klikker «Legg til» og fyller hver blokk med sin egen oppføring.
@@ -132,6 +183,8 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   const matches = classified.matches.filter((m) => !sections.handled.has(m.el));
   const unrecognized = classified.unrecognized;
   const used = new Set<FieldKey>();
+  /** Tekstfelt vi fylte, for kontrollrunden etterpå. */
+  const filledText: { el: HTMLInputElement | HTMLTextAreaElement; value: string }[] = [];
 
   // Sikreste treff først, så de vinner hvis flere felt matcher samme nøkkel.
   matches.sort((a, b) => b.result.confidence - a.result.confidence);
@@ -145,7 +198,9 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
       report.status = "skipped-has-value";
       continue;
     }
-    if (!payload.overwrite && hasValue(el)) {
+    // Første alternativ i en landskode-liste («AC +247») er bare et alfabetisk standardvalg, ikke brukerens.
+    const defaultDialCode = isDialCodeSelect(el) && (el as HTMLSelectElement).selectedIndex === 0;
+    if (!payload.overwrite && hasValue(el) && !defaultDialCode) {
       report.status = "skipped-has-value";
       continue;
     }
@@ -157,6 +212,9 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
       if (value.kind === "file") {
         const file = payload.files[key as keyof FillPayload["files"]];
         if (el instanceof HTMLInputElement && el.type === "file" && file) ok = setFileValue(el, base64ToFile(file));
+      } else if (el instanceof HTMLSelectElement && key === "birthDate" && fillDateSelects(el, value.value) > 0) {
+        // Dato delt i flere lister (år/måned/dag): alle delene er fylt.
+        ok = true;
       } else if (el instanceof HTMLSelectElement) {
         const options = Array.from(el.options);
         const i = optionMatcher(key, value.value, payload.profile)(options.map((o) => o.text));
@@ -187,9 +245,19 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
       continue;
     }
     used.add(key);
+    if ((el instanceof HTMLInputElement && el.type !== "file") || el instanceof HTMLTextAreaElement) filledText.push({ el, value: el.value });
     const sure = confidence >= HIGH_CONFIDENCE;
     report.status = sure ? "filled" : "uncertain";
     highlight(el, sure ? "filled" : "uncertain", sure ? `Masterkey: ${FIELD_LABELS[key]}` : `Masterkey: ${FIELD_LABELS[key]}? Sjekk at dette stemmer.`);
+  }
+
+  // Kontrollrunde: noen sider tømmer felt etterpå (f.eks. «By» slås opp fra postnummeret når
+  // postnummerfeltet mister fokus). Fyll dem én gang til hvis de ble tømt.
+  if (filledText.length) {
+    await new Promise((r) => setTimeout(r, 700));
+    for (const { el, value } of filledText) {
+      if (el.isConnected && el.value === "" && value) setTextValue(el, value);
+    }
   }
 
   const groups = fillChoiceGroups(payload, doc);

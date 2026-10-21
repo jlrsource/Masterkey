@@ -10,7 +10,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, type Frame, type Page } from "playwright-core";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -21,6 +21,10 @@ interface Site {
   name: string;
   platform: string;
   url?: string;
+  /** Lagret side (Cmd+S «Webside, komplett»), relativt til e2e/saved/. For skjemaer som krever innlogging. */
+  file?: string;
+  /** Erstatt verdier som allerede står i skjemaet (lagrede sider kan inneholde brukerens egne data). */
+  overwrite?: boolean;
   resolve?: Record<string, string>;
 }
 
@@ -34,6 +38,15 @@ async function json(url: string): Promise<any> {
 
 /** Henter adressen til et søknadsskjema for en aktiv annonse fra plattformens offentlige API. */
 async function resolveUrl(site: Site): Promise<string> {
+  if (site.file) {
+    // Lagrede sider: fjern sidens egne skript, ellers starter appen på nytt i kopien og tegner over
+    // (eller tømmer) skjemaet. Kopien ligger i samme mappe, så bilder og CSS i _files/ fortsatt virker.
+    const src = join(here, "saved", site.file);
+    const html = readFileSync(src, "utf8").replace(/<script\b[\s\S]*?<\/script>/gi, "");
+    const copy = join(here, "saved", `.noscript-${site.file}`);
+    writeFileSync(copy, html);
+    return pathToFileURL(copy).href;
+  }
   if (site.url) return site.url;
   const [kind, company] = Object.entries(site.resolve ?? {})[0] ?? [];
   switch (kind) {
@@ -137,11 +150,17 @@ function collectFields(): FieldInfo[] {
     let filled: boolean;
     if (input.type === "checkbox" || input.type === "radio") {
       filled = input.type === "radio" ? Boolean(document.querySelector(`input[type=radio][name="${CSS.escape(input.name)}"]:checked`)) : input.checked;
-    } else if (input.type === "file") filled = (input.files?.length ?? 0) > 0;
-    else if (el instanceof HTMLSelectElement) filled = el.selectedIndex > 0 || (el.value !== "" && el.selectedIndex === 0 && !/select|velg|choose/i.test(el.options[0]?.text ?? ""));
+    } else if (input.type === "file") {
+      // Mange sider laster opp med en gang og tømmer filfeltet; da vises filnavnet ved siden av.
+      let box: Element | null = el.parentElement;
+      for (let i = 0; box && i < 5 && box.querySelectorAll("input[type=file]").length <= 1; i++) box = box.parentElement;
+      const near = (box?.querySelectorAll("input[type=file]").length ?? 0) <= 1 ? box : el.parentElement;
+      filled = (input.files?.length ?? 0) > 0 || /Kari_Nordmann_CV/.test(near?.textContent ?? "");
+    }
+    else if (el instanceof HTMLSelectElement) filled = el.selectedIndex > 0 || (el.value !== "" && el.selectedIndex === 0 && !/select|velg|vælg|välj|choose|wähl/i.test(el.options[0]?.text ?? ""));
     else if (el instanceof HTMLInputElement && el.getAttribute("role") === "combobox") filled = el.value.trim() !== "" || Boolean(shownValue(el));
     else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) filled = el.value.trim() !== "";
-    else filled = !/^(select|velg|choose)/i.test(text(el.textContent));
+    else filled = !/^(select|velg|vælg|välj|choose)/i.test(text(el.textContent));
     const required = input.required || el.getAttribute("aria-required") === "true" || /\*/.test(label);
     const value =
       input.type === "file"
@@ -241,7 +260,7 @@ async function runSite(site: Site, page: Page): Promise<Result> {
       const engine = (window as any).__soknadsprofil;
       if (!engine) throw new Error("motoren ble ikke lastet");
       return engine.fill(p);
-    }, payload);
+    }, { ...payload, overwrite: Boolean(site.overwrite) });
     await page.waitForTimeout(800);
 
     const fields = await frame.evaluate(collectFields);

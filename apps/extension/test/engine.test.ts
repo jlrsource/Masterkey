@@ -753,3 +753,78 @@ describe("Workday-treffrad: radioknapp og tekst er søsken (fra Inspiser 20. okt
     expect(pills.textContent).toBe("Engineering");
   }, 20000);
 });
+
+describe("norske skjemaer: dato i tre lister, års erfaring, innlogging, dansk plassholder", () => {
+  const months = ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"];
+  it("fyller år, måned og dag i hver sin liste", async () => {
+    document.body.innerHTML = `
+      <div><label for="y">Fødselsdato</label>
+        <span><select id="y"><option value="">År</option>${Array.from({ length: 80 }, (_, i) => `<option>${2010 - i}</option>`).join("")}</select>
+        <select id="m" aria-label="Måned"><option value="">Måned</option>${months.map((n, i) => `<option value="${i + 1}">${n}</option>`).join("")}</select>
+        <select id="d" aria-label="Dag"><option value="">Dag</option>${Array.from({ length: 31 }, (_, i) => `<option>${i + 1}</option>`).join("")}</select></span>
+      </div>`;
+    await fill();
+    const v = (id: string) => (document.getElementById(id) as HTMLSelectElement).selectedOptions[0]!.text;
+    expect([v("y"), v("m"), v("d")]).toEqual(["1995", "april", "17"]);
+  });
+
+  it("regner ut års erfaring og velger riktig intervall", async () => {
+    const p: FullProfile = {
+      ...profile,
+      experiences: [{ employer: "A", title: "x", start_date: "2020-01-01", end_date: "2024-06-01", is_current: false, sort_order: 0 }],
+    };
+    document.body.innerHTML = `<label for="a">Hvor mange års relevant erfaring har du?*</label><input id="a">`;
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect((document.getElementById("a") as HTMLInputElement).value).toBe("4");
+    document.body.innerHTML = `<label for="b">Years of experience</label><select id="b"><option value="">Velg</option><option>0-2</option><option>3-5</option><option>6-10</option><option>10+</option></select>`;
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect((document.getElementById("b") as HTMLSelectElement).selectedOptions[0]!.text).toBe("3-5");
+  });
+
+  it("rører ikke innloggingsbokser", async () => {
+    document.body.innerHTML = `
+      <div class="login"><label for="le">E-mail</label><input id="le"><label for="pw">Password</label><input id="pw" type="password"><button>Log ind</button></div>
+      <form><label for="e">E-post</label><input id="e"><label for="f">Fornavn</label><input id="f"><label for="l">Etternavn</label><input id="l"></form>`;
+    await fill();
+    expect((document.getElementById("le") as HTMLInputElement).value).toBe("");
+    expect((document.getElementById("e") as HTMLInputElement).value).toBe("kari@example.no");
+  });
+
+  it("forstår dansk «Vælg» som tom liste", async () => {
+    document.body.innerHTML = `<label for="c">Land</label><select id="c"><option value="0">Vælg</option><option value="45">Danmark</option><option value="47">Norge</option></select>`;
+    await fill();
+    expect((document.getElementById("c") as HTMLSelectElement).value).toBe("47");
+  });
+
+  it("fyller på nytt når siden tømmer et felt etterpå (By fra postnummer)", async () => {
+    document.body.innerHTML = `<label for="z">Postnr.</label><input id="z" autocomplete="postal-code"><label for="c">By</label><input id="c" autocomplete="address-level2">`;
+    const zip = document.getElementById("z") as HTMLInputElement;
+    const city = document.getElementById("c") as HTMLInputElement;
+    // Som HR-manager: slår opp byen fra postnummeret når feltet mister fokus, og tømmer den hvis ukjent.
+    zip.addEventListener("focusout", () => setTimeout(() => (city.value = ""), 100));
+    await fill();
+    expect(city.value).toBe("Oslo");
+  });
+});
+
+describe("landskode-lister for telefon", () => {
+  it.each([
+    [["AC +247", "AD +376", "NO +47", "SJ +47"], "NO +47"],
+    [["Velg", "Norway (+47)", "Sweden (+46)"], "Norway (+47)"],
+    [["+46 Sverige", "+47 Norge", "+45 Danmark"], "+47 Norge"],
+  ])("%j → %s", async (options, expected) => {
+    document.body.innerHTML = `<label for="c">Land</label><select id="c">${options.map((o) => `<option>${o}</option>`).join("")}</select>`;
+    await fill(true);
+    expect((document.getElementById("c") as HTMLSelectElement).selectedOptions[0]!.text).toBe(expected);
+  });
+});
+
+it("landskode-liste ved telefonnummeret tolkes som land, ikke telefon (Finn)", async () => {
+  document.body.innerHTML = `
+    <div><label for="t">Telefonnummer</label>
+      <select id="c" aria-label="land"><option>AC +247</option><option>AD +376</option><option>AE +971</option><option>NO +47</option><option>SE +46</option></select>
+      <input id="t" type="tel"></div>`;
+  await fill();
+  expect((document.getElementById("c") as HTMLSelectElement).selectedOptions[0]!.text).toBe("NO +47");
+  expect((document.getElementById("t") as HTMLInputElement).value).toBe("+47 900 00 000");
+});

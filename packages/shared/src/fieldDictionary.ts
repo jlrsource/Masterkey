@@ -38,7 +38,7 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   postalCode: ["postnummer", "postnr", "post nr", "zip", "zip code", "zipcode", "postal code", "postcode", "postal"],
   city: ["poststed", "sted", "by", "city", "town", "bosted"],
   country: ["land", "country", "nasjonalitet"],
-  birthDate: ["fødselsdato", "fodselsdato", "født", "birth date", "date of birth", "birthdate", "dob", "birthday"],
+  birthDate: ["fødselsdato", "fodselsdato", "født", "fødselsår", "fødeår", "birth date", "date of birth", "birthdate", "dob", "birthday", "year of birth", "birth year"],
   linkedin: ["linkedin", "linked in", "linkedin url", "linkedin profil", "linkedin profile"],
   website: ["nettside", "hjemmeside", "portefølje", "portfolio", "website", "personal website", "web site", "homepage", "url", "web address", "webadresse", "nettadresse"],
   github: ["github", "git hub", "github url", "github profile"],
@@ -53,6 +53,10 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   ],
   degree: ["grad", "gradsnivå", "utdanningsnivå", "studienivå", "type grad", "bachelor eller master", "degree", "degree level", "qualification"],
   fieldOfStudy: ["fagfelt", "studieretning", "studium", "studiet", "studiet ditt", "studieprogram", "studieprogrammet", "hva studerer du", "kva studerer du", "field of study", "major", "discipline", "programme", "program of study"],
+  yearsExperience: [
+    "års erfaring", "års relevant erfaring", "år med erfaring", "antall år erfaring", "år arbeidserfaring", "arbeidserfaring år",
+    "years of experience", "years experience", "years of relevant experience", "years of work experience", "how many years",
+  ],
   grade: ["snittkarakter", "karaktersnitt", "gjennomsnittskarakter", "gjennomsnittlig karakter", "snitt", "gpa", "grade point average", "average grade"],
   studyCity: [
     "studieby", "studiebyen", "by er du student", "stad by er du student", "sted by er du student", "by studerer du",

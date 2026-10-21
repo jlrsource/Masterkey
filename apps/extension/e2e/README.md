@@ -23,6 +23,17 @@ I `sites.json`: enten `resolve` (henter en aktiv annonse fra plattformens API: g
 ashby, workable, smartrecruiters) eller en fast `url`. Norske plattformer og Workday krever ofte
 faste URL-er.
 
+## Skjemaer som krever innlogging
+Gå til skjemaet mens du er logget inn, **før du fyller inn noe**, og lagre med `Cmd + S`
+(«Webside, komplett») i `e2e/saved/`. Legg så til i `sites.json`:
+
+```json
+{ "name": "Webcruiter (lagret)", "platform": "webcruiter", "file": "webcruiter.html" }
+```
+
+Lagrede sider er en «fryst» kopi: felt fylles og måles riktig, men knapper som henter data fra
+plattformen (søk, opplasting) virker ikke. `e2e/saved/` er ignorert av git.
+
 ## Kjente begrensninger
 - Sider med captcha mot automatiske nettlesere (f.eks. SmartRecruiters) kan ikke testes automatisk.
 - ⚠ «iframe fra et annet domene»: testen fyller ut likevel, men den ekte extensionen når ikke slike

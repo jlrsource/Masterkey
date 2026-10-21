@@ -52,6 +52,10 @@ export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | nul
     case "degree": return text(latestEducation(p)?.degree);
     case "fieldOfStudy": return text(latestEducation(p)?.field_of_study);
     case "grade": return text(latestEducation(p)?.grade);
+    case "yearsExperience": {
+      const years = yearsOfExperience(p);
+      return years === null ? null : text(String(years));
+    }
     case "studyCity": return text(latestEducation(p)?.location);
     case "cvFile": {
       const d = pickDocument(p, "cv");
@@ -68,6 +72,34 @@ export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | nul
     default:
       return null;
   }
+}
+
+/**
+ * Samlet arbeidserfaring i hele år, fra jobbene i profilen. Overlappende perioder telles én gang
+ * (to deltidsjobber samtidig gir ikke dobbel erfaring). Null hvis ingen jobb har startdato.
+ */
+export function yearsOfExperience(p: FullProfile, today = new Date()): number | null {
+  const ranges = p.experiences
+    .filter((e) => e.start_date)
+    .map((e) => {
+      const start = new Date(e.start_date!).getTime();
+      const end = e.is_current || !e.end_date ? today.getTime() : new Date(e.end_date).getTime();
+      return [start, Math.max(start, end)] as const;
+    })
+    .filter(([s, e]) => !Number.isNaN(s) && !Number.isNaN(e))
+    .sort((a, b) => a[0] - b[0]);
+  if (!ranges.length) return null;
+  let total = 0;
+  let [curStart, curEnd] = ranges[0]!;
+  for (const [s, e] of ranges.slice(1)) {
+    if (s <= curEnd) curEnd = Math.max(curEnd, e);
+    else {
+      total += curEnd - curStart;
+      [curStart, curEnd] = [s, e];
+    }
+  }
+  total += curEnd - curStart;
+  return Math.floor(total / (365.25 * 24 * 3600 * 1000));
 }
 
 /** Datoformat ut fra input-type: `date` vil ha ISO, ellers norsk dd.mm.åååå. */

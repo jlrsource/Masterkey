@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeCompleteness } from "./completeness";
-import { formatDateForInput, resolveValue } from "./resolve";
+import { formatDateForInput, resolveValue, yearsOfExperience } from "./resolve";
 import { emptyProfile, type FullProfile } from "./schema";
 
 const profile: FullProfile = {
@@ -51,5 +51,23 @@ describe("computeCompleteness", () => {
   });
   it("teller oppfylte punkter", () => {
     expect(computeCompleteness(profile).score).toBeGreaterThan(20);
+  });
+});
+
+describe("yearsOfExperience", () => {
+  const today = new Date("2026-10-21");
+  it("summerer perioder og teller overlapp én gang", () => {
+    const p: FullProfile = {
+      ...emptyProfile(),
+      experiences: [
+        { employer: "A", title: "x", start_date: "2018-01-01", end_date: "2020-01-01", is_current: false, sort_order: 0 },
+        { employer: "B", title: "y", start_date: "2019-01-01", end_date: "2021-01-01", is_current: false, sort_order: 1 }, // overlapper
+        { employer: "C", title: "z", start_date: "2023-10-21", is_current: true, sort_order: 2 },
+      ],
+    };
+    expect(yearsOfExperience(p, today)).toBe(6); // 2018–2021 (3 år) + 2023–2026 (3 år)
+  });
+  it("gir null uten datoer", () => {
+    expect(yearsOfExperience(emptyProfile(), today)).toBeNull();
   });
 });

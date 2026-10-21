@@ -42,6 +42,107 @@
       "resolve": {
         "lever": "spotify"
       }
+    },
+    {
+      "name": "Webcruiter",
+      "platform": "webcruiter",
+      "url": "https://candidate.webcruiter.com/nb-no/cv?_sp=c51d5e13-c023-4041-b987-8e993393701c.1792613628997&advertid=5198372017&link_source_id=2000#apply/right"
+    },
+    {
+      "name": "Jobbnorge",
+      "platform": "jobbnorge",
+      "url": "https://jobseeker.jobbnorge.no/client/apply/308950/cv"
+    },
+    {
+      "name": "Teamtailor (Telenor Cyberdefence)",
+      "platform": "teamtailor",
+      "url": "https://jobs.telenorcyberdefence.com/jobs/6438199-cloud-security-consultant"
+    },
+    {
+      "name": "Jobylon (KPMG)",
+      "platform": "jobylon",
+      "url": "https://emp.jobylon.com/applications/jobs/390677/create/"
+    },
+    {
+      "name": "ReachMee gammel",
+      "platform": "reachmee",
+      "url": "https://web103.reachmee.com/ext/I009/978/apply?site=14&lang=NO&validator=3cdb7454e340567fdf0c0f429026b7fa&job_id=855"
+    },
+    {
+      "name": "ReachMee ny (Apotek 1)",
+      "platform": "reachmee",
+      "url": "https://apotek1.attract.reachmee.com/jobs/6036-farmasoyt-apotek-1-skarersletta-avd-hjemmetje?rmpage=apply&rmjob=6036"
+    },
+    {
+      "name": "Workday (Wilhelmsen)",
+      "platform": "workday",
+      "url": "https://wilhelmsen.wd3.myworkdayjobs.com/en-US/Wilhelmsen/job/Kuala-Lumpur/Senior-Accounts-Executive_JOBREQ_13056/apply"
+    },
+    {
+      "name": "SmartRecruiters (SAP)",
+      "platform": "smartrecruiters",
+      "url": "https://jobs.smartrecruiters.com/oneclick-ui/company/SAPITBusinessSysteme/publication/a040e4b3-97d8-40b8-b8ce-45fb0b393219?dcr_ci=SAPITBusinessSysteme"
+    },
+    {
+      "name": "SmartRecruiters (Statkraft)",
+      "platform": "smartrecruiters",
+      "url": "https://jobs.smartrecruiters.com/oneclick-ui/company/Statkraft1/publication/f55a7351-98d6-4659-93df-92bf58a2412c?dcr_ci=Statkraft1"
+    },
+    {
+      "name": "Visma Easycruit (Innlandet)",
+      "platform": "easycruit",
+      "url": "https://innlandet.easycruit.com/vacancy/application/send/3671029/189599"
+    },
+    {
+      "name": "Varbi (Blå Kors)",
+      "platform": "varbi",
+      "url": "https://blakors.varbi.com/apply/position/980288/"
+    },
+    {
+      "name": "Finn enkel søknad",
+      "platform": "finn",
+      "url": "https://www.finn.no/job/apply?adId=479088146&nocache=1792616719945"
+    },
+    {
+      "name": "Talent Recruiter (HR-manager)",
+      "platform": "hrmanager",
+      "url": "https://candidate.hr-manager.net/ApplicationForm/SinglePageApplicationForm.aspx?cid=342&departmentId=27450&ProjectId=271319&MediaId=5"
+    },
+    {
+      "name": "Webcruiter (lagret)",
+      "platform": "webcruiter",
+      "file": "Søknad - Webcruiter.html",
+      "overwrite": true
+    },
+    {
+      "name": "Jobbnorge CV (lagret)",
+      "platform": "jobbnorge",
+      "file": "CV.html",
+      "overwrite": true
+    },
+    {
+      "name": "Jobbnorge vedlegg (lagret)",
+      "platform": "jobbnorge",
+      "file": "Vedlegg.html",
+      "overwrite": true
+    },
+    {
+      "name": "Finn (lagret)",
+      "platform": "finn",
+      "file": "FINN.no - Jobb.html",
+      "overwrite": true
+    },
+    {
+      "name": "Workday (lagret)",
+      "platform": "workday",
+      "file": "Senior Accounts Executive.html",
+      "overwrite": true
+    },
+    {
+      "name": "SmartRecruiters Orkla (lagret)",
+      "platform": "smartrecruiters",
+      "file": "Easy apply - Area Sales Manager, Salve - Orkla Health.html",
+      "overwrite": true
     }
   ]
 }

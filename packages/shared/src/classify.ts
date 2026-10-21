@@ -62,7 +62,7 @@ type Source = keyof typeof SOURCE_WEIGHTS;
 
 export function classifyField(d: FieldDescriptor): Classification | null {
   const type = (d.type ?? "").toLowerCase();
-  if (["hidden", "submit", "button", "reset", "image", "password", "checkbox", "radio", "search"].includes(type)) return null;
+  if (["hidden", "submit", "button", "reset", "image", "password", "checkbox", "radio", "search", "range", "color"].includes(type)) return null;
 
   // 1. autocomplete-attributtet er det sikreste signalet.
   const ac = (d.autocomplete ?? "").toLowerCase().split(/\s+/).find((t) => t in AUTOCOMPLETE_MAP);

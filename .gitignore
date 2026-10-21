@@ -12,3 +12,4 @@ playwright-report
 
 # Benchmark-resultater (skjermbilder og HTML-kopier av tredjepartssider)
 apps/extension/e2e/results/
+apps/extension/e2e/saved/
