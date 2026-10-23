@@ -168,7 +168,7 @@ type DatePart = "year" | "month" | "day";
 const MONTH_NAMES = /^(jan|feb|mar|apr|mai|may|jun|jul|aug|sep|okt|oct|nov|des|dec)/i;
 
 /** Hvilken del av en dato en nedtrekksliste er, ut fra alternativene (årstall, 1–12/månedsnavn, 1–31). */
-function selectDatePart(sel: HTMLSelectElement): DatePart | null {
+export function selectDatePart(sel: HTMLSelectElement): DatePart | null {
   const opts = Array.from(sel.options).filter((o) => !isPlaceholderOption(o)).map((o) => o.text.trim());
   if (opts.length < 2) return null;
   const nums = opts.map((t) => Number(t)).filter((n) => Number.isInteger(n));
@@ -186,6 +186,24 @@ function selectDatePart(sel: HTMLSelectElement): DatePart | null {
  * Datoer delt i flere nedtrekkslister (år/måned/dag). Finner listene i samme lille gruppe som
  * `el`, avgjør hvilken del hver er ut fra alternativene, og fyller alle. Returnerer antall fylt.
  */
+/** Velg riktig alternativ i en liste som er én del av en dato (år, måned som tall/navn, dag). */
+export function setDatePartSelect(sel: HTMLSelectElement, part: DatePart, iso: string): boolean {
+  const [y, m, d] = iso.split("-");
+  const want = part === "year" ? y : part === "month" ? m : d;
+  if (!want) return false;
+  const opts = Array.from(sel.options);
+  const option =
+    opts.find((o) => !isPlaceholderOption(o) && (Number(o.text.trim()) === Number(want) || Number(o.value) === Number(want))) ??
+    (part === "month" ? opts.filter((o) => MONTH_NAMES.test(o.text.trim()))[Number(m) - 1] : undefined);
+  if (!option) return false;
+  simulateFocus(sel);
+  sel.value = option.value;
+  sel.dispatchEvent(new Event("input", { bubbles: true }));
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+  simulateBlur(sel);
+  return true;
+}
+
 export function fillDateSelects(el: HTMLSelectElement, iso: string): number {
   const [y, m, d] = iso.split("-");
   if (!y || !m || !d) return 0;
@@ -348,7 +366,22 @@ function groupContainer(inputs: HTMLInputElement[]): Element | null {
 }
 
 function groupQuestion(container: Element, first: HTMLInputElement): string {
-  const legend = first.closest("fieldset")?.querySelector("legend");
+  // Tekst i gruppens egen boks som ikke hører til alternativene (f.eks. <p>Muntlig</p> foran valgene).
+  const clone = container.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll("label, input, fieldset, legend").forEach((n) => n.remove());
+  const own = clip(clone.textContent);
+  if (own) return own;
+  const fieldset = first.closest("fieldset");
+  // Deler flere grupper samme fieldset («Skriftlig» og «Muntlig» under «Hvor godt behersker du
+  // språket?»), er teksten rett over gruppen mer presis enn fellesoverskriften.
+  const groupsInFieldset = fieldset
+    ? new Set(Array.from(fieldset.querySelectorAll<HTMLInputElement>(CHOICE_SELECTOR)).map((i) => i.name || i.id)).size
+    : 0;
+  if (fieldset && groupsInFieldset > 1 && !container.contains(fieldset)) {
+    const near = nearbyText(container);
+    if (near) return near;
+  }
+  const legend = fieldset?.querySelector("legend");
   if (legend) return clip(legend.textContent);
   const labelled = first.closest("[role=radiogroup],[role=group]");
   if (labelled) {
@@ -370,7 +403,7 @@ function smallestSharedAncestor(el: HTMLInputElement): Element | null {
 }
 
 /** Finn grupper av avkrysningsbokser/radioknapper med minst to alternativer. */
-export function scanChoiceGroups(doc: Document): ChoiceGroup[] {
+export function scanChoiceGroups(doc: Document | Element): ChoiceGroup[] {
   const inputs = Array.from(doc.querySelectorAll<HTMLInputElement>(CHOICE_SELECTOR)).filter((el) => !el.disabled);
 
   // 1. Samme name = samme gruppe (vanlig for radioknapper).

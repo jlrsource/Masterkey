@@ -828,3 +828,114 @@ it("landskode-liste ved telefonnummeret tolkes som land, ikke telefon (Finn)", a
   expect((document.getElementById("c") as HTMLSelectElement).selectedOptions[0]!.text).toBe("NO +47");
   expect((document.getElementById("t") as HTMLInputElement).value).toBe("+47 900 00 000");
 });
+
+describe("Jobbnorge-mønster: redigeringsboks med «Lagre», én om gangen", () => {
+  const MONTHS = ["Januar", "Februar", "Mars", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Desember"];
+  const monthSelect = (id: string) => `<select id="${id}">${MONTHS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("")}</select>`;
+  let n = 0;
+  const editors: Record<string, () => string> = {
+    utdanning: () => `
+      <fieldset><legend>Hva har du studert?</legend>
+        <label for="sr${n}">Studieretning</label><input id="sr${n}">
+        <label for="ui${n}">Utdanningsinstitusjon *</label><input id="ui${n}">
+        <label><input type="checkbox" id="fb${n}"> Har fagbrev</label>
+        <label for="sp${n}">Studiepoeng / Vekttall</label><input id="sp${n}">
+        <label for="gr${n}">Grad</label><input id="gr${n}">
+      </fieldset>
+      <fieldset><legend>Når gjennomførte du studiet?</legend>
+        <label><input type="checkbox" id="fu${n}"> Er fortsatt under utdanning</label>
+        <div><label for="fm${n}">Fra Måned</label>${monthSelect(`fm${n}`)}<label for="fa${n}">Fra År *</label><input id="fa${n}"></div>
+        <div><label for="tm${n}">Til Måned</label>${monthSelect(`tm${n}`)}<label for="ta${n}">Til År *</label><input id="ta${n}"></div>
+      </fieldset>`,
+    yrkeserfaring: () => `
+      <fieldset><legend>Hvor har du jobbet?</legend>
+        <label for="ag${n}">Arbeidsgiver *</label><input id="ag${n}">
+        <label for="st${n}">Stilling *</label><input id="st${n}">
+      </fieldset>
+      <fieldset><legend>Når jobbet du i denne stillingen?</legend>
+        <label><input type="checkbox" id="fa_${n}"> Fortsatt ansatt</label>
+        <div><label for="wfm${n}">Fra Måned</label>${monthSelect(`wfm${n}`)}<label for="wfa${n}">Fra År *</label><input id="wfa${n}"></div>
+        <div><label for="wtm${n}">Til Måned</label>${monthSelect(`wtm${n}`)}<label for="wta${n}">Til År *</label><input id="wta${n}"></div>
+      </fieldset>`,
+    språk: () => `
+      <fieldset><legend>Hvilket språk vil du legge til på CVen?</legend>
+        <label for="sl${n}">Språk *</label><select id="sl${n}"><option value="">Velg</option><option>Engelsk</option><option>Norsk - bokmål</option></select>
+      </fieldset>
+      <fieldset><legend>Hvor godt behersker du språket?</legend>
+        <div class="q"><p>Skriftlig</p>${["Morsmål", "Flytende", "Gode kunnskaper", "Grunnleggende kunnskaper"].map((o, i) => `<label><input type="radio" name="w${n}" value="${i}"> ${o}</label>`).join("")}</div>
+        <div class="q"><p>Muntlig</p>${["Morsmål", "Flytende", "Gode kunnskaper", "Grunnleggende kunnskaper"].map((o, i) => `<label><input type="radio" name="s${n}" value="${i}"> ${o}</label>`).join("")}</div>
+      </fieldset>`,
+    referanser: () => `
+      <fieldset><legend>Hvem vil du legge til som referanse?</legend>
+        <label for="rn${n}">Fullt navn *</label><input id="rn${n}">
+        <label for="rf${n}">Firma *</label><input id="rf${n}">
+        <label for="rt${n}">Tittel/rolle *</label><input id="rt${n}">
+      </fieldset>
+      <fieldset><legend>Kontaktinformasjon</legend>
+        <label for="re${n}">E-post</label><input id="re${n}">
+        <label for="rm${n}">Mobiltelefon *</label><input id="rm${n}">
+      </fieldset>`,
+  };
+  const section = (title: string) => `
+    <section data-s="${title.toLowerCase()}">
+      <div class="head"><h1>${title}</h1><button type="button" class="add">Legg til</button></div>
+      <div class="saved"></div><div class="editor"></div>
+    </section>`;
+
+  function jobbnorgePage() {
+    document.body.innerHTML = `
+      <h1>Personalia</h1><label for="pf">Fornavn</label><input id="pf" value="Kari">
+      ${section("Utdanning")}${section("Yrkeserfaring")}${section("Språk")}${section("Referanser")}${section("Linker")}`;
+    document.querySelectorAll<HTMLElement>("section").forEach((sec) => {
+      const editor = sec.querySelector<HTMLElement>(".editor")!;
+      sec.querySelector(".add")!.addEventListener("click", () => {
+        if (document.querySelector(".editor form")) return; // bare én åpen redigeringsboks om gangen
+        n++;
+        setTimeout(() => {
+          editor.innerHTML = `<form>${editors[sec.dataset.s!]?.() ?? ""}<button type="button" class="cancel">Avbryt</button><button type="button" class="save">Lagre</button></form>`;
+          editor.querySelector(".save")!.addEventListener("click", () => {
+            const values = Array.from(editor.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input:not([type=checkbox]):not([type=radio]), select")).map((i) => i.value);
+            editor.querySelectorAll<HTMLInputElement>("input[type=radio]:checked").forEach((r) => values.push(r.parentElement!.textContent!.trim()));
+            sec.querySelector(".saved")!.insertAdjacentHTML("beforeend", `<div class="card">${values.join(" | ")}</div>`);
+            editor.innerHTML = "";
+          });
+        }, 50);
+      });
+    });
+  }
+
+  it("legger til, fyller og lagrer hver oppføring, og fyller referanser med referansen (ikke brukeren)", async () => {
+    jobbnorgePage();
+    const p: FullProfile = {
+      ...profile,
+      experiences: [
+        { employer: "Bærum kommune", title: "Assistent", start_date: "2025-01-01", end_date: "2025-06-01", is_current: false, sort_order: 0 },
+        { employer: "Rema 1000", title: "Butikkmedarbeider", start_date: "2022-08-01", end_date: "2024-12-01", is_current: false, sort_order: 1 },
+      ],
+      educations: [{ school: "NTNU", degree: "Integrert master", field_of_study: "Ingeniørvitenskap & IKT", start_date: "2024-08-01", end_date: "2029-06-01", sort_order: 0 }],
+      languages: [{ language: "Engelsk", spoken_level: "fluent", written_level: "conversational", sort_order: 0 }],
+      references: [{ name: "Ola Leder", company: "Bærum kommune", role: "Rektor", email: "ola@example.no", phone: "+47 400 00 000", sort_order: 0 }],
+    };
+    const report = await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    const cards = (s: string) => Array.from(document.querySelectorAll(`section[data-s="${s}"] .card`)).map((c) => c.textContent);
+
+    expect(cards("yrkeserfaring")).toEqual(["Bærum kommune | Assistent | 1 | 2025 | 6 | 2025", "Rema 1000 | Butikkmedarbeider | 8 | 2022 | 12 | 2024"]);
+    // Pågående studium: Til-feltene står tomme (standardmåned «Januar» = 1).
+    expect(cards("utdanning")).toEqual([expect.stringMatching(/^Ingeniørvitenskap & IKT \| NTNU \| \d+ \| Integrert master \| 8 \| 2024 \| 1 \| $/)]);
+    // Skriftlig «godt» → Gode kunnskaper, muntlig «flytende» → Flytende.
+    expect(cards("språk")).toEqual(["Engelsk | Gode kunnskaper | Flytende"]);
+    expect(cards("referanser")).toEqual(["Ola Leder | Bærum kommune | Rektor | ola@example.no | +47 400 00 000"]);
+    const labels = report.fields.filter((f) => ["experiences", "educations", "languages", "references"].includes(f.key)).map((f) => f.label);
+    expect(labels).toEqual(["Utdanning (1 av 1)", "Arbeidserfaring (2 av 2)", "Språk (1 av 1)", "Referanser (1 av 1)"]);
+  }, 30000);
+
+  it("fyller aldri referanse-felt med brukerens egne opplysninger", async () => {
+    jobbnorgePage();
+    // Åpne referanseboksen manuelt (som brukeren kan ha gjort), uten referanser i profilen.
+    (document.querySelector('section[data-s="referanser"] .add') as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 100));
+    await fillDocument({ profile: { ...profile, references: [] }, files: {}, overwrite: false }, document);
+    const ref = Array.from(document.querySelectorAll<HTMLInputElement>('section[data-s="referanser"] .editor input')).map((i) => i.value);
+    expect(ref.every((v) => v === "")).toBe(true);
+  }, 20000);
+});

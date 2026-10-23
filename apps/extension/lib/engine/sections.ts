@@ -6,8 +6,10 @@ import {
   languageLevelOptionIndex,
   languageOptionIndex,
   overallLanguageLevel,
+  type Certification,
   type Education,
   type Experience,
+  type Reference,
   type FullProfile,
   type Language,
   type LanguageLevel,
@@ -16,9 +18,13 @@ import {
 import type { FieldReport, FillPayload } from "../types";
 import { HINT_ERRORS, hintedFieldKey } from "./platforms";
 import { fillSearchInput, isSearchInput, pickFromListbox, realClick } from "./picker";
-import { commonAncestor, sleep, waitFor } from "./util";
+import { commonAncestor, describeEl, log, sleep, waitFor } from "./util";
 import {
   bestOptionIndex,
+  checkOption,
+  scanChoiceGroups,
+  selectDatePart,
+  setDatePartSelect,
   describeField,
   hasValue,
   highlight,
@@ -37,7 +43,7 @@ import {
  * venter på at den nye blokken dukker opp, og fyller den med akkurat den oppføringen.
  */
 
-export type SectionKind = "experiences" | "educations" | "volunteering" | "languages" | "websites";
+export type SectionKind = "experiences" | "educations" | "volunteering" | "languages" | "websites" | "references" | "certifications";
 
 export const SECTION_LABELS: Record<SectionKind, string> = {
   experiences: "Arbeidserfaring",
@@ -45,15 +51,20 @@ export const SECTION_LABELS: Record<SectionKind, string> = {
   volunteering: "Verv",
   languages: "Språk",
   websites: "Nettsider",
+  references: "Referanser",
+  certifications: "Kurs og sertifikater",
 };
 
 const MAX_ENTRIES = 10;
 
 // Rekkefølgen betyr noe: «Volunteer experience» skal bli verv, ikke arbeidserfaring.
 const SECTION_PATTERNS: [SectionKind, RegExp][] = [
+  // Andre personer først: disse skal aldri få brukerens egne opplysninger.
+  ["references", /referanse|\breferences?\b|referees?|attestant/],
   ["volunteering", /volunt|frivillig|\bverv\b/],
+  ["certifications", /\bkurs\b|\bcourses?\b|sertifikat|sertifisering|certific|licen[sc]e|lisens/],
   ["languages", /\blanguages?\b|\bspråk/],
-  ["websites", /\bwebsites?\b|\bnettsider?\b|\bnettsteder\b|\blinks\b|\blenker\b|online profiles?/],
+  ["websites", /\bwebsites?\b|\bnettsider?\b|\bnettsteder\b|\blinks\b|\blenker\b|\blinker\b|online profiles?/],
   ["educations", /education|utdanning|skolegang|academic|studier/],
   ["experiences", /work experience|employment|work history|arbeidserfaring|yrkeserfaring|arbeidsforhold|erfaring|experience/],
 ];
@@ -74,12 +85,42 @@ type BlockKey =
   | "title" | "employer" | "location" | "current" | "start" | "end" | "description"
   | "school" | "degree" | "field" | "grade"
   | "language" | "fluent" | "overall" | "spoken" | "written"
-  | "url" | "urlType";
+  | "url" | "urlType"
+  | "credits"
+  | "refName" | "refCompany" | "refRole" | "email" | "phone" | "relation"
+  | "certName" | "issuer";
 
 /** Felt som alltid er avkrysningsbokser (og bare de). */
 const CHECKBOX_KEYS: BlockKey[] = ["current", "fluent"];
 
-const FIELD_PATTERNS: Record<"work" | "education" | "language" | "website", [BlockKey, RegExp][]> = {
+type FieldGroup = "work" | "education" | "language" | "website" | "reference" | "certification";
+
+const GROUP_OF: Record<SectionKind, FieldGroup> = {
+  experiences: "work",
+  volunteering: "work",
+  educations: "education",
+  languages: "language",
+  websites: "website",
+  references: "reference",
+  certifications: "certification",
+};
+
+const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
+  reference: [
+    // Teksten er normalisert («E-post» → «e post»), så bindestrek kan være mellomrom.
+    ["email", /\be ?post|\be ?mail|\bmail\b/],
+    ["phone", /telefon|mobil|\bphone\b|\btlf\b/],
+    ["relation", /relasjon|relation|forhold til|relationship/],
+    ["refCompany", /firma|company|arbeidsgiver|employer|organisasjon|organi[sz]ation|bedrift/],
+    ["refRole", /tittel|rolle|\btitle\b|\brole\b|stilling|position/],
+    ["refName", /navn|\bname\b/],
+  ],
+  certification: [
+    ["issuer", /utsteder|arrangør|issuer|institusjon|institution|tilbyder|provider|organisasjon|skole/],
+    ["url", /url|lenke|link/],
+    ["start", /dato|\bdate\b|fullført|completed|\bår\b|\byear\b|\bfra\b|\bfrom\b/],
+    ["certName", /navn|\bname\b|kurs|sertifikat|tittel|\btitle\b|certific/],
+  ],
   website: [
     ["urlType", /\btype\b|\bkind\b|\bslags\b/],
     ["url", /url|website|nettside|link|lenke|adresse|address/],
@@ -101,11 +142,13 @@ const FIELD_PATTERNS: Record<"work" | "education" | "language" | "website", [Blo
     ["location", /location|arbeidssted|\bsted\b|\bcity\b|\bby\b/],
   ],
   education: [
+    ["current", /fortsatt|under utdanning|currently|ongoing|pågående|studerer|in progress|still studying/],
+    ["credits", /studiepoeng|vekttall|\bcredits?\b|\bects\b/],
     ["description", /description|beskrivelse/],
     ["start", /\bfrom\b|\bfra\b|\bstart|first year/],
     ["end", /\bto\b|\btil\b|\bend\b|slutt|last year|graduat|ferdig/],
     ["field", /field of study|fagfelt|studieretning|\bmajor\b|discipline|studium|studiet|studieprogram/],
-    ["school", /school|university|universitet|skole|lærested|institution|college|høgskole|høgskule/],
+    ["school", /school|university|universitet|skole|lærested|institution|institusjon|lærestad|college|høgskole|høgskule/],
     ["degree", /degree|\bgrad\b|utdanningsnivå|nivå/],
     ["grade", /gpa|\bgrade\b|karakter|snitt|overall result/],
   ],
@@ -133,6 +176,17 @@ interface Section {
   kind: SectionKind;
   addButton: HTMLElement;
   container: Element;
+  /** Seksjonens overskrift og neste seksjons overskrift: alt mellom dem hører til seksjonen. */
+  heading?: HTMLElement;
+  nextHeading?: HTMLElement | null;
+}
+
+const isAfter = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING);
+
+/** Felt i seksjonen: mellom overskriften og neste overskrift på samme nivå (ellers containeren). */
+function sectionControls(doc: Document, section: Section): HTMLElement[] {
+  if (!section.heading) return controlsIn(section.container);
+  return controlsIn(doc).filter((el) => isAfter(el, section.heading!) && (!section.nextHeading || isAfter(section.nextHeading, el)));
 }
 
 function findAddButtons(doc: Document): HTMLElement[] {
@@ -159,7 +213,11 @@ export function findSections(doc: Document): Section[] {
     while (idx > 0 && /\d+$/.test(norm(preceding[idx]!.textContent ?? "")) && kindFromText(norm(preceding[idx - 1]!.textContent ?? "")) === kind) idx--;
     const heading = idx >= 0 && lastKind === kind ? preceding[idx] : undefined;
     const container = heading ? commonAncestor([heading, button]) : button.parentElement;
-    if (container && !sections.some((s) => s.kind === kind)) sections.push({ kind, addButton: button, container });
+    // Neste seksjon starter ved neste overskrift av samme type (h1 → h1), som ikke er en blokk-overskrift.
+    const nextHeading = heading
+      ? headings.find((h) => isAfter(h, button) && h.tagName === heading.tagName && !/\d+$/.test(norm(h.textContent ?? ""))) ?? null
+      : null;
+    if (container && !sections.some((s) => s.kind === kind)) sections.push({ kind, addButton: button, container, heading, nextHeading });
   }
   return sections;
 }
@@ -169,11 +227,16 @@ export function findSections(doc: Document): Section[] {
 type DatePart = "month" | "year" | "day";
 
 function datePart(el: HTMLElement): DatePart | null {
-  if (!(el instanceof HTMLInputElement)) return null;
-  const t = norm(`${el.getAttribute("aria-label") ?? ""} ${el.placeholder} ${el.getAttribute("data-automation-id") ?? ""} ${el.name}`);
-  if (/\bmonth\b|måned|\bmm\b|datesectionmonth/.test(t)) return "month";
-  if (/\byear\b|\bår\b|\byyyy\b|åååå|datesectionyear/.test(t)) return "year";
-  if (/\bday\b|\bdag\b|\bdd\b|datesectionday/.test(t)) return "day";
+  // Nedtrekksliste: alternativene avslører delen (årstall, 1–12/månedsnavn, 1–31).
+  if (el instanceof HTMLSelectElement) return selectDatePart(el);
+  if (!(el instanceof HTMLInputElement) || !["text", "number", "tel", ""].includes(el.type)) return null;
+  const own = describeField(el);
+  const t = norm(`${el.getAttribute("aria-label") ?? ""} ${el.placeholder} ${el.getAttribute("data-automation-id") ?? ""} ${el.name} ${own.label ?? ""}`);
+  // Ikke \b rundt norske ord: i JavaScript regnes ikke «å» som en bokstav, så \bår\b treffer aldri.
+  const word = (w: string) => new RegExp(`(^|[^\\p{L}])${w}([^\\p{L}]|$)`, "u");
+  if (word("month").test(t) || /måned/.test(t) || word("mm").test(t) || /datesectionmonth/.test(t)) return "month";
+  if (word("year").test(t) || word("år").test(t) || word("yyyy").test(t) || /åååå|datesectionyear/.test(t)) return "year";
+  if (word("day").test(t) || word("dag").test(t) || word("dd").test(t) || /datesectionday/.test(t)) return "day";
   return null;
 }
 
@@ -201,7 +264,7 @@ function blockKey(el: HTMLElement, kind: SectionKind, block: HTMLElement[]): Blo
   const text = fieldText(el, block);
   if (!text) return null;
   const isCheckbox = el instanceof HTMLInputElement && el.type === "checkbox";
-  const group = kind === "educations" ? "education" : kind === "languages" ? "language" : kind === "websites" ? "website" : "work";
+  const group = GROUP_OF[kind];
   for (const [key, re] of FIELD_PATTERNS[group]) {
     if (CHECKBOX_KEYS.includes(key) !== isCheckbox) continue;
     // Type-feltet er en nedtrekksliste, ikke et tekstfelt.
@@ -218,7 +281,23 @@ interface WebsiteEntry {
   sort_order: number;
 }
 
-type Entry = Experience | Education | Volunteering | Language | WebsiteEntry;
+type Entry = Experience | Education | Volunteering | Language | WebsiteEntry | Reference | Certification;
+
+/** Pågår utdanningen (ingen sluttdato, eller sluttdato frem i tid)? */
+function stillStudying(e: Record<string, unknown>, today = new Date()): boolean {
+  const end = typeof e.end_date === "string" ? new Date(e.end_date) : null;
+  return !end || Number.isNaN(end.getTime()) || end > today;
+}
+
+/** Studiepoeng ut fra antall semestre (30 per semester) fra start til slutt, eller til i dag. */
+function creditsFor(e: Record<string, unknown>, today = new Date()): string | null {
+  if (typeof e.start_date !== "string") return null;
+  const start = new Date(e.start_date);
+  const end = stillStudying(e, today) ? today : new Date(e.end_date as string);
+  const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  if (Number.isNaN(months) || months < 4) return null;
+  return String(Math.round(months / 6) * 30);
+}
 
 const WEBSITE_TYPE_WORDS: Record<WebsiteEntry["type"], string[]> = {
   linkedin: ["linkedin"],
@@ -233,9 +312,18 @@ function entryValue(key: BlockKey, entry: Entry, kind: SectionKind): string | bo
     case "title": return kind === "volunteering" ? s("role") : s("title");
     case "employer": return kind === "volunteering" ? s("organization") : s("employer");
     case "location": return s("location");
-    case "current": return Boolean(e.is_current);
-    case "start": return s("start_date");
-    case "end": return e.is_current ? null : s("end_date");
+    case "current": return kind === "educations" ? stillStudying(e) : Boolean(e.is_current);
+    case "start": return kind === "certifications" ? s("issued_date") : s("start_date");
+    case "end": return e.is_current || (kind === "educations" && stillStudying(e)) ? null : s("end_date");
+    case "credits": return creditsFor(e);
+    case "refName": return s("name");
+    case "refCompany": return s("company");
+    case "refRole": return s("role");
+    case "email": return s("email");
+    case "phone": return s("phone");
+    case "relation": return s("relation");
+    case "certName": return s("name");
+    case "issuer": return s("issuer");
     case "description": return s("description");
     case "school": return s("school");
     // Uten grad i profilen: let etter nivået i fagfelt/beskrivelse («Bachelor i økonomi»).
@@ -293,6 +381,71 @@ function matchOption(texts: string[], value: string, key: BlockKey, context: str
   return bestOptionIndex(texts.map((text) => ({ text })), value, 2);
 }
 
+const SAVE_LABEL = /^(lagre|save|ok|ferdig|done|bekreft|confirm|legg til (oppføring|denne)|add entry)$/;
+const FORBIDDEN_LABEL = /send|submit|neste|next|fortsett|continue|søk(nad)?\b|apply/;
+
+/** Boksen rundt en blokk som har sin egen «Lagre»-knapp (redigeringsboks), eller null. */
+function editorRoot(block: HTMLElement[]): Element | null {
+  let node: Element | null = commonAncestor(block) ?? block[0]?.parentElement ?? null;
+  for (let depth = 0; node && depth < 6; depth++) {
+    if (saveButtonIn(node)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** «Lagre»-knappen i en redigeringsboks. Aldri «Send»/«Neste»/«Søk»: de sender inn eller går videre. */
+function saveButtonIn(root: Element): HTMLElement | null {
+  const buttons = Array.from(root.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"]'));
+  return (
+    buttons.find((b) => {
+      const t = norm(b.getAttribute("aria-label") || b.textContent || (b as HTMLInputElement).value || "");
+      return SAVE_LABEL.test(t) && !FORBIDDEN_LABEL.test(t) && isVisible(b) && !(b as HTMLButtonElement).disabled;
+    }) ?? null
+  );
+}
+
+/**
+ * Lagre blokken hvis den ligger i en redigeringsboks med egen «Lagre» (f.eks. Jobbnorge, der bare
+ * én oppføring kan redigeres om gangen). Returnerer en feilmelding hvis lagringen ikke gikk.
+ */
+async function saveBlockIfNeeded(block: HTMLElement[]): Promise<string | null> {
+  const root = editorRoot(block);
+  const save = root && saveButtonIn(root);
+  if (!save) return null;
+  const doc = save.ownerDocument;
+  const errorsBefore = new Set(visibleErrors(doc));
+  log(`lagrer blokken med ${describeEl(save)}`);
+  realClick(save);
+  const closed = await waitFor(() => block.every((el) => !el.isConnected || !isVisible(el)), 5000);
+  if (closed) return null;
+  const newErrors = visibleErrors(doc).filter((e) => !errorsBefore.has(e));
+  return newErrors.length ? `«Lagre» ga feil: «${newErrors[0]!.slice(0, 80)}»` : "blokken ble ikke lagret";
+}
+
+/** Radioknapp-grupper i blokken (f.eks. språknivå «Skriftlig»/«Muntlig»): velg alternativet som passer. */
+function fillBlockRadios(block: HTMLElement[], entry: Entry, kind: SectionKind): number {
+  const root = editorRoot(block) ?? commonAncestor(block);
+  if (!root) return 0;
+  let filled = 0;
+  for (const group of scanChoiceGroups(root)) {
+    if (group.options.some((o) => o.el.checked)) continue;
+    const question = norm(group.question);
+    const key = FIELD_PATTERNS[GROUP_OF[kind]].find(([k, re]) => !CHECKBOX_KEYS.includes(k) && re.test(question))?.[0];
+    if (!key) continue;
+    const value = entryValue(key, entry, kind);
+    if (typeof value !== "string") continue;
+    const texts = group.options.map((o) => o.text);
+    const i = ["overall", "spoken", "written"].includes(key) ? languageLevelOptionIndex(texts, value as LanguageLevel) : bestOptionIndex(texts.map((text) => ({ text })), value, 2);
+    const option = group.options[i];
+    if (!option) continue;
+    checkOption(option.el);
+    highlight(option.el.labels?.[0] ?? option.el, "filled", `Masterkey: ${SECTION_LABELS[kind]}`);
+    filled++;
+  }
+  return filled;
+}
+
 /** Fagfelt, skole og beskrivelse: avgjør f.eks. «Master of Science» vs. «Master of Arts». */
 function entryContext(entry: Entry): string {
   const e = entry as Record<string, unknown>;
@@ -322,6 +475,7 @@ async function setControl(
     }
     return false;
   }
+  if (el instanceof HTMLSelectElement && part && (key === "start" || key === "end")) return setDatePartSelect(el, part, value);
   const text = key === "start" || key === "end" ? formatDate(value, el, part) : value;
   if (el instanceof HTMLSelectElement) {
     if (["degree", "language", "overall", "spoken", "written", "urlType"].includes(key)) {
@@ -372,7 +526,7 @@ async function fillBlock(block: HTMLElement[], entry: Entry, kind: SectionKind):
       console.warn("[Masterkey] kunne ikke fylle felt i blokk", key, e);
     }
   }
-  return filled;
+  return filled + fillBlockRadios(block, entry, kind);
 }
 
 // ---------------------------------------------------------------- hovedløkken
@@ -393,6 +547,8 @@ function websiteEntries(profile: FullProfile): WebsiteEntry[] {
 
 function entriesFor(kind: SectionKind, profile: FullProfile): Entry[] {
   if (kind === "websites") return websiteEntries(profile);
+  if (kind === "references") return [...(profile.references ?? [])] as Entry[];
+  if (kind === "certifications") return [...(profile.certifications ?? [])] as Entry[];
   const list = (profile[kind] ?? []) as Entry[];
   return [...list].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).slice(0, MAX_ENTRIES);
 }
@@ -405,7 +561,9 @@ function newEmptyControls(doc: Document, before: Set<HTMLElement>): HTMLElement[
 /** Er feltet urørt? Avkrysningsbokser: ikke krysset av. Nedtrekksknapper: viser fortsatt «Velg …». */
 function isEmptyControl(el: HTMLElement): boolean {
   if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) return !el.checked;
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return !hasValue(el);
+  // En liste på første alternativ er urørt, selv om det ikke er en «Velg …»-plassholder (f.eks. «Januar»).
+  if (el instanceof HTMLSelectElement) return el.selectedIndex <= 0 || !hasValue(el);
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return !hasValue(el);
   const t = norm(el.textContent ?? "");
   return !t || /^(select|velg|choose|vel)\b/.test(t) || t === "select one";
 }
@@ -457,15 +615,19 @@ async function addBlock(
     const before = new Set(controlsIn(doc));
     const errorsBefore = new Set(visibleErrors(doc));
     button.scrollIntoView?.({ block: "center" });
-    button.click();
+    log(`${SECTION_LABELS[kind]}: klikker ${describeEl(button)} «${norm(button.textContent ?? "")}»`);
+    realClick(button);
     const appeared = await waitFor(() => {
       const fresh = newEmptyControls(doc, before);
       return fresh.length ? fresh : null;
     }, 4000);
     if (appeared) {
       await sleep(300); // la resten av blokken bli tegnet
-      return { block: newEmptyControls(doc, before), reason: "" };
+      const block = newEmptyControls(doc, before);
+      log(`${SECTION_LABELS[kind]}: ny blokk med ${block.length} felt`);
+      return { block, reason: "" };
     }
+    log(`${SECTION_LABELS[kind]}: ingen nye tomme felt (${controlsIn(doc).filter((el) => !before.has(el)).length} nye felt totalt)`);
     // Forklar hva som skjedde, så vi vet hva som må fikses.
     const newErrors = visibleErrors(doc).filter((e) => !errorsBefore.has(e));
     const changed = controlsIn(doc).filter((el) => !before.has(el)).length;
@@ -495,7 +657,7 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
     const report: FieldReport = { key: kind, label: SECTION_LABELS[kind], confidence: 1, status: "no-value" };
     fields.push(report);
 
-    const existing = controlsIn(initial.container);
+    const existing = sectionControls(doc, initial);
     existing.forEach((el) => handled.add(el));
     if (entries.length === 0) continue;
     if (!payload.overwrite && existing.some((el) => !isEmptyControl(el))) {
@@ -510,9 +672,11 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
     if (existing.length > 0 && (await fillBlock(existing, entries[0]!, kind)) > 0) {
       done = 1;
       previousBlock = existing;
+      const saveError = await saveBlockIfNeeded(existing);
+      if (saveError) stopReason = saveError;
     }
 
-    for (let i = done; i < entries.length; i++) {
+    for (let i = done; i < entries.length && !stopReason; i++) {
       const { block, reason } = await addBlock(doc, kind, previousBlock);
       if (!block) {
         stopReason = reason;
@@ -525,6 +689,9 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
       }
       previousBlock = block;
       done++;
+      // Redigeringsboks med egen «Lagre»: lagre før neste «Legg til» (ellers går det ikke).
+      const saveError = await saveBlockIfNeeded(block);
+      if (saveError) stopReason = saveError;
     }
 
     report.label = `${SECTION_LABELS[kind]} (${done} av ${entries.length}${stopReason ? `: ${stopReason}` : ""})`;
@@ -532,6 +699,6 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
   }
   // Seksjonene tegnes ofte på nytt (nye elementer). Den vanlige utfyllingen skal ikke røre noe
   // inni dem, ellers kan f.eks. «web address» i en URL-blokk få postadressen.
-  for (const section of findSections(doc)) controlsIn(section.container).forEach((el) => handled.add(el));
+  for (const section of findSections(doc)) sectionControls(doc, section).forEach((el) => handled.add(el));
   return { handled, fields };
 }

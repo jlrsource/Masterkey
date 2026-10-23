@@ -57,7 +57,7 @@ const ORDER: LanguageLevel[] = ["basic", "conversational", "fluent", "native"];
 const EXACT_WORDS: Record<LanguageLevel, RegExp> = {
   native: /native|morsmål|mother tongue/,
   fluent: /fluent|flytende|full professional/,
-  conversational: /conversational|professional working|\bgood\b|\bgodt\b/,
+  conversational: /conversational|professional working|\bgood\b|\bgodt?\b|\bgode\b/,
   basic: /basic|grunnleggende|elementary/,
 };
 
@@ -65,7 +65,7 @@ const EXACT_WORDS: Record<LanguageLevel, RegExp> = {
 const LEVEL_WORDS: Record<LanguageLevel, RegExp> = {
   native: /native|mother tongue|morsmål|bilingual|tospråklig/,
   fluent: /fluent|flytende|full professional|proficient|advanced|avansert|expert|c1|c2/,
-  conversational: /intermediate|conversational|working|professional|good|godt|middels|b1|b2/,
+  conversational: /intermediate|conversational|working|professional|good|godt?\b|gode|middels|b1|b2/,
   basic: /basic|beginner|elementary|limited|grunnleggende|nybegynner|a1|a2/,
 };
 
