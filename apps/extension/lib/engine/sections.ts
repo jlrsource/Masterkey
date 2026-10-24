@@ -17,8 +17,8 @@ import {
 } from "@soknadsprofil/shared";
 import type { FieldReport, FillPayload } from "../types";
 import { HINT_ERRORS, hintedFieldKey } from "./platforms";
-import { fillSearchInput, isSearchInput, pickFromListbox, realClick } from "./picker";
-import { commonAncestor, describeEl, log, sleep, waitFor } from "./util";
+import { fillSearchInput, isSearchInput, pickFromListbox, pickFromMenu, realClick, type OptionMatcher } from "./picker";
+import { commonAncestor, composedContains, composedParent, deepQueryAll, describeEl, documentHost, log, sleep, waitFor } from "./util";
 import {
   bestOptionIndex,
   checkOption,
@@ -79,7 +79,12 @@ function isAddLabel(text: string): boolean {
 
 /** Alt som kan fylles ut i en blokk, inkludert egendefinerte nedtrekkslister. */
 const BLOCK_CONTROLS =
-  'input:not([type="hidden"]):not([type="file"]):not([type="radio"]), textarea, select, button[aria-haspopup="listbox"], [role="combobox"]:not(input)';
+  'input:not([type="hidden"]):not([type="file"]):not([type="radio"]), textarea, select, button[aria-haspopup="listbox"], [role="combobox"]:not(input), [role="menu"][aria-label]';
+
+/** Nedtrekksliste bygget som meny (role="menu" med role="menuitem"), f.eks. Jobbnorges månedsvelger. */
+function isMenuDropdown(el: Element): boolean {
+  return el.getAttribute("role") === "menu" && el.querySelectorAll('[role="menuitem"]').length >= 2;
+}
 
 type BlockKey =
   | "title" | "employer" | "location" | "current" | "start" | "end" | "description"
@@ -123,6 +128,7 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
   ],
   website: [
     ["urlType", /\btype\b|\bkind\b|\bslags\b/],
+    ["description", /beskrivelse|description|hva handler|handler lenken|about|om lenken/],
     ["url", /url|website|nettside|link|lenke|adresse|address/],
   ],
   language: [
@@ -133,7 +139,7 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
     ["language", /language|språk/],
   ],
   work: [
-    ["current", /currently|jobber her|nåværende|pågående|\bcurrent\b|present/],
+    ["current", /currently|jobber her|nåværende|pågående|fortsatt|\bcurrent\b|present|\bstill\b/],
     ["description", /description|beskrivelse|arbeidsoppgaver|responsibilit|ansvar|oppgaver/],
     ["start", /\bfrom\b|\bfra\b|\bstart/],
     ["end", /\bto\b|\btil\b|\bend\b|slutt/],
@@ -156,9 +162,14 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
 
 // ---------------------------------------------------------------- hjelpere
 
+/** Felt i et område, også inni web-komponenter (åpen shadow DOM, f.eks. Jobbnorges jn-input). */
 function controlsIn(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(BLOCK_CONTROLS)).filter(
-    (el) => isVisible(el) && !(el as HTMLInputElement).disabled && el.getAttribute("aria-hidden") !== "true",
+  return deepQueryAll<HTMLElement>(root, BLOCK_CONTROLS).filter(
+    (el) =>
+      (el.getAttribute("role") !== "menu" || isMenuDropdown(el)) &&
+      isVisible(el) &&
+      !(el as HTMLInputElement).disabled &&
+      el.getAttribute("aria-hidden") !== "true",
   );
 }
 
@@ -174,7 +185,8 @@ function kindFromText(text: string): SectionKind | null {
 
 interface Section {
   kind: SectionKind;
-  addButton: HTMLElement;
+  /** «Legg til»-knappen. Mangler når en redigeringsboks allerede er åpen (knappen er da skjult). */
+  addButton: HTMLElement | null;
   container: Element;
   /** Seksjonens overskrift og neste seksjons overskrift: alt mellom dem hører til seksjonen. */
   heading?: HTMLElement;
@@ -186,7 +198,11 @@ const isAfter = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Nod
 /** Felt i seksjonen: mellom overskriften og neste overskrift på samme nivå (ellers containeren). */
 function sectionControls(doc: Document, section: Section): HTMLElement[] {
   if (!section.heading) return controlsIn(section.container);
-  return controlsIn(doc).filter((el) => isAfter(el, section.heading!) && (!section.nextHeading || isAfter(section.nextHeading, el)));
+  // Felt inni web-komponenter sammenlignes via komponenten (verten) i dokumentet.
+  return controlsIn(doc).filter((el) => {
+    const host = documentHost(el);
+    return isAfter(host, section.heading!) && (!section.nextHeading || isAfter(section.nextHeading, host));
+  });
 }
 
 function findAddButtons(doc: Document): HTMLElement[] {
@@ -206,6 +222,16 @@ export function findSections(doc: Document): Section[] {
   for (const button of findAddButtons(doc)) {
     const preceding = headings.filter((h) => h.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING);
     let idx = preceding.length - 1;
+    // Lagrede oppføringer har ofte egne, lavere overskrifter («Norsk - bokmål» under «Språk»).
+    // Gå bakover forbi dem til nærmeste overskrift som er en seksjon, men ikke forbi en på samme nivå.
+    const level = (h: HTMLElement) => (/^H[1-6]$/.test(h.tagName) ? Number(h.tagName[1]) : 7);
+    for (let j = idx; j >= 0; j--) {
+      if (kindFromText(norm(preceding[j]!.textContent ?? ""))) {
+        const between = preceding.slice(j + 1, idx + 1);
+        if (between.every((h) => level(h) > level(preceding[j]!))) idx = j;
+        break;
+      }
+    }
     const lastKind = idx >= 0 ? kindFromText(norm(preceding[idx]!.textContent ?? "")) : null;
     // «Add Work Experience» i aria-label sier det direkte. Ellers avgjør overskriften.
     const kind = kindFromText(norm(button.getAttribute("aria-label") ?? "")) ?? lastKind;
@@ -219,6 +245,15 @@ export function findSections(doc: Document): Section[] {
       : null;
     if (container && !sections.some((s) => s.kind === kind)) sections.push({ kind, addButton: button, container, heading, nextHeading });
   }
+  // Seksjoner uten synlig «Legg til» fordi en redigeringsboks (med «Lagre») allerede er åpen.
+  for (const heading of headings.filter((h) => /^H[1-4]$/.test(h.tagName))) {
+    const kind = kindFromText(norm(heading.textContent ?? ""));
+    if (!kind || sections.some((s) => s.kind === kind) || /\d+$/.test(norm(heading.textContent ?? ""))) continue;
+    const nextHeading = headings.find((h) => isAfter(h, heading) && h.tagName === heading.tagName) ?? null;
+    const section: Section = { kind, addButton: null, container: heading.parentElement ?? heading, heading, nextHeading };
+    const controls = sectionControls(doc, section);
+    if (controls.length && editorRoot(controls)) sections.push(section);
+  }
   return sections;
 }
 
@@ -229,6 +264,10 @@ type DatePart = "month" | "year" | "day";
 function datePart(el: HTMLElement): DatePart | null {
   // Nedtrekksliste: alternativene avslører delen (årstall, 1–12/månedsnavn, 1–31).
   if (el instanceof HTMLSelectElement) return selectDatePart(el);
+  if (isMenuDropdown(el)) {
+    const items = Array.from(el.querySelectorAll('[role="menuitem"]')).map((i) => norm(i.textContent ?? ""));
+    return items.filter((t) => /^(jan|feb|mar|apr|mai|may|jun|jul|aug|sep|okt|oct|nov|des|dec)/.test(t)).length >= 10 ? "month" : null;
+  }
   if (!(el instanceof HTMLInputElement) || !["text", "number", "tel", ""].includes(el.type)) return null;
   const own = describeField(el);
   const t = norm(`${el.getAttribute("aria-label") ?? ""} ${el.placeholder} ${el.getAttribute("data-automation-id") ?? ""} ${el.name} ${own.label ?? ""}`);
@@ -243,13 +282,14 @@ function datePart(el: HTMLElement): DatePart | null {
 /** Teksten som beskriver feltet. For dato-deler (måned/år) er det teksten til hele dato-gruppen («From»). */
 function fieldText(el: HTMLElement, block: HTMLElement[]): string {
   if (datePart(el)) {
-    let node = el.parentElement;
+    // Klatre (også ut av web-komponenter) så lenge vi bare har dato-deler rundt oss.
+    let node = composedParent(el);
     let text = "";
-    for (let depth = 0; node && depth < 6; depth++) {
-      const inside = block.filter((c) => node!.contains(c));
+    for (let depth = 0; node && depth < 8; depth++) {
+      const inside = block.filter((c) => composedContains(node!, c));
       if (inside.some((c) => !datePart(c))) break; // gått ut av dato-gruppen
-      text = labelWithoutControls(node);
-      node = node.parentElement;
+      text = labelWithoutControls(node) || text;
+      node = composedParent(node);
     }
     return norm(text);
   }
@@ -267,8 +307,9 @@ function blockKey(el: HTMLElement, kind: SectionKind, block: HTMLElement[]): Blo
   const group = GROUP_OF[kind];
   for (const [key, re] of FIELD_PATTERNS[group]) {
     if (CHECKBOX_KEYS.includes(key) !== isCheckbox) continue;
-    // Type-feltet er en nedtrekksliste, ikke et tekstfelt.
+    // Type-feltet er en nedtrekksliste, ikke et tekstfelt. URL står aldri i et stort tekstfelt.
     if (key === "urlType" && el instanceof HTMLInputElement) continue;
+    if (key === "url" && el instanceof HTMLTextAreaElement) continue;
     if (re.test(text)) return key;
   }
   return null;
@@ -299,6 +340,13 @@ function creditsFor(e: Record<string, unknown>, today = new Date()): string | nu
   return String(Math.round(months / 6) * 30);
 }
 
+/** Beskrivelse av lenken, slik feltene heter i profilen. */
+const WEBSITE_DESCRIPTIONS: Record<WebsiteEntry["type"], string> = {
+  linkedin: "LinkedIn",
+  github: "GitHub",
+  website: "Nettside/portefølje",
+};
+
 const WEBSITE_TYPE_WORDS: Record<WebsiteEntry["type"], string[]> = {
   linkedin: ["linkedin"],
   github: ["github"],
@@ -324,7 +372,6 @@ function entryValue(key: BlockKey, entry: Entry, kind: SectionKind): string | bo
     case "relation": return s("relation");
     case "certName": return s("name");
     case "issuer": return s("issuer");
-    case "description": return s("description");
     case "school": return s("school");
     // Uten grad i profilen: let etter nivået i fagfelt/beskrivelse («Bachelor i økonomi»).
     case "degree": {
@@ -340,6 +387,9 @@ function entryValue(key: BlockKey, entry: Entry, kind: SectionKind): string | bo
     }
     case "overall": return overallLanguageLevel(entry as Language);
     case "url": return s("url");
+    case "description":
+      if (kind === "websites") return WEBSITE_DESCRIPTIONS[(e.type as WebsiteEntry["type"]) ?? "website"] ?? null;
+      return s("description");
     case "urlType": return s("type");
     case "spoken": return s("spoken_level") ?? overallLanguageLevel(entry as Language);
     case "written": return s("written_level") ?? overallLanguageLevel(entry as Language);
@@ -386,10 +436,10 @@ const FORBIDDEN_LABEL = /send|submit|neste|next|fortsett|continue|søk(nad)?\b|a
 
 /** Boksen rundt en blokk som har sin egen «Lagre»-knapp (redigeringsboks), eller null. */
 function editorRoot(block: HTMLElement[]): Element | null {
-  let node: Element | null = commonAncestor(block) ?? block[0]?.parentElement ?? null;
-  for (let depth = 0; node && depth < 6; depth++) {
+  let node: Element | null = commonAncestor(block) ?? (block[0] ? composedParent(block[0]) : null);
+  for (let depth = 0; node && depth < 8; depth++) {
     if (saveButtonIn(node)) return node;
-    node = node.parentElement;
+    node = composedParent(node);
   }
   return null;
 }
@@ -415,11 +465,33 @@ async function saveBlockIfNeeded(block: HTMLElement[]): Promise<string | null> {
   if (!save) return null;
   const doc = save.ownerDocument;
   const errorsBefore = new Set(visibleErrors(doc));
+  const textBefore = new Set(textLines(root!));
   log(`lagrer blokken med ${describeEl(save)}`);
+  // Påkrevde felt som fortsatt er tomme (en vanlig grunn til at «Lagre» ikke gjør noe).
+  const emptyRequired = deepQueryAll<HTMLElement>(root!, '[required], [aria-required="true"]')
+    .filter((el) => (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.value.trim())
+    .map((el) => describeField(el as HTMLInputElement).label ?? (el as HTMLInputElement).name);
+  if (emptyRequired.length) log("påkrevde felt som er tomme før «Lagre»:", emptyRequired);
   realClick(save);
-  const closed = await waitFor(() => block.every((el) => !el.isConnected || !isVisible(el)), 5000);
-  if (closed) return null;
+  // Noen sider sjekker innholdet før de lagrer (f.eks. lenkeskanning hos Jobbnorge). Vent rolig.
+  const closed = await waitFor(() => block.every((el) => !el.isConnected || !isVisible(el)), 12000);
+  if (closed) {
+    log("lagret ✓");
+    return null;
+  }
+  const invalid = root ? invalidFields(root) : [];
+  if (invalid.length) {
+    log("lagring stoppet, ugyldige felt:", invalid);
+    return `«Lagre» stoppet på: ${invalid.slice(0, 3).join(", ")}`;
+  }
+  // Ny tekst i boksen etter klikket er nesten alltid en valideringsmelding («Fra dato må være før til dato»).
+  const newText = root ? textLines(root).filter((t) => !textBefore.has(t)) : [];
+  if (newText.length) {
+    log("lagring stoppet med melding:", newText);
+    return `«Lagre» ga melding: «${newText[0]!.slice(0, 80)}»`;
+  }
   const newErrors = visibleErrors(doc).filter((e) => !errorsBefore.has(e));
+  log("lagring gikk ikke. Nye meldinger på siden:", newErrors);
   return newErrors.length ? `«Lagre» ga feil: «${newErrors[0]!.slice(0, 80)}»` : "blokken ble ikke lagret";
 }
 
@@ -428,7 +500,7 @@ function fillBlockRadios(block: HTMLElement[], entry: Entry, kind: SectionKind):
   const root = editorRoot(block) ?? commonAncestor(block);
   if (!root) return 0;
   let filled = 0;
-  for (const group of scanChoiceGroups(root)) {
+  for (const group of scanChoiceGroups(root, { deep: true })) {
     if (group.options.some((o) => o.el.checked)) continue;
     const question = norm(group.question);
     const key = FIELD_PATTERNS[GROUP_OF[kind]].find(([k, re]) => !CHECKBOX_KEYS.includes(k) && re.test(question))?.[0];
@@ -476,6 +548,13 @@ async function setControl(
     return false;
   }
   if (el instanceof HTMLSelectElement && part && (key === "start" || key === "end")) return setDatePartSelect(el, part, value);
+  if (isMenuDropdown(el)) {
+    const match: OptionMatcher =
+      part === "month" && (key === "start" || key === "end")
+        ? (texts) => (Number(value.split("-")[1]) - 1 < texts.length ? Number(value.split("-")[1]) - 1 : -1)
+        : (texts) => matchOption(texts, value, key, context);
+    return pickFromMenu(el, match);
+  }
   const text = key === "start" || key === "end" ? formatDate(value, el, part) : value;
   if (el instanceof HTMLSelectElement) {
     if (["degree", "language", "overall", "spoken", "written", "urlType"].includes(key)) {
@@ -517,7 +596,9 @@ async function fillBlock(block: HTMLElement[], entry: Entry, kind: SectionKind):
     const value = entryValue(key, entry, kind);
     if (value === null || value === false) continue;
     try {
-      if (await setControl(el, value, key, part, entryContext(entry), aiSearchTerms(entry))) {
+      const ok = await setControl(el, value, key, part, entryContext(entry), aiSearchTerms(entry));
+      log(`  ${key}${part ? `/${part}` : ""} = «${String(value).slice(0, 40)}» ${ok ? "✓" : "✗ ble ikke satt"}`);
+      if (ok) {
         usedKeys.add(slot);
         filled++;
         highlight(el, "filled", `Masterkey: ${SECTION_LABELS[kind]}`);
@@ -560,6 +641,8 @@ function newEmptyControls(doc: Document, before: Set<HTMLElement>): HTMLElement[
 
 /** Er feltet urørt? Avkrysningsbokser: ikke krysset av. Nedtrekksknapper: viser fortsatt «Velg …». */
 function isEmptyControl(el: HTMLElement): boolean {
+  // Menyvelgere har alltid et standardvalg (f.eks. inneværende måned). De regnes som urørte.
+  if (isMenuDropdown(el)) return true;
   if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) return !el.checked;
   // En liste på første alternativ er urørt, selv om det ikke er en «Velg …»-plassholder (f.eks. «Januar»).
   if (el instanceof HTMLSelectElement) return el.selectedIndex <= 0 || !hasValue(el);
@@ -574,12 +657,28 @@ function isEmptyControl(el: HTMLElement): boolean {
  */
 /** Synlige feilmeldinger på siden, f.eks. «This field is required». */
 function visibleErrors(doc: Document): string[] {
-  return Array.from(
-    doc.querySelectorAll<HTMLElement>(['[role="alert"]', ".error", ".errorMessage", ...HINT_ERRORS].join(", ")),
-  )
+  return deepQueryAll<HTMLElement>(doc, ['[role="alert"]', ".error", ".errorMessage", ...HINT_ERRORS].join(", "))
     .filter(isVisible)
     .map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+    .filter((t) => t && t.length < 200);
+}
+
+/** Synlige tekstlinjer i et område (uten innholdet i feltene), for å se hva som endret seg. */
+function textLines(root: Element): string[] {
+  return deepQueryAll<HTMLElement>(root, "li, p, span, div, small, label, strong")
+    .filter((el) => isVisible(el) && !el.querySelector("input, select, textarea, li, p, div"))
+    .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
+    .filter((t) => t.length > 3 && t.length < 160);
+}
+
+/** Felt i boksen som siden har markert som ugyldige (aria-invalid eller ugyldig ifølge nettleseren). */
+function invalidFields(root: Element): string[] {
+  return deepQueryAll<HTMLElement>(root, "input, select, textarea, [aria-invalid]")
+    .filter((el) => el.getAttribute("aria-invalid") === "true" || (el as HTMLInputElement).validity?.valid === false)
+    .map((el) => {
+      const d = describeField(el as HTMLInputElement);
+      return (d.label || d.ariaLabel || d.placeholder || d.name || "ukjent felt").replace(/\s*\*\s*$/, "").slice(0, 40);
+    });
 }
 
 /**
@@ -610,7 +709,11 @@ async function addBlock(
     (doc.activeElement as HTMLElement | null)?.blur?.();
     await sleep(attempt === 0 ? 400 : 1200);
     // Siden tegnes ofte på nytt etter hvert klikk, så knappen må finnes på nytt hver gang.
-    const button = addButtonAfter(doc, previousBlock) ?? findSections(doc).find((s) => s.kind === kind)?.addButton;
+    // Etter «Lagre» kan det ta litt tid før «Legg til» er tilbake.
+    const button = await waitFor(
+      () => addButtonAfter(doc, previousBlock) ?? findSections(doc).find((s) => s.kind === kind)?.addButton ?? null,
+      5000,
+    );
     if (!button) return { block: null, reason };
     const before = new Set(controlsIn(doc));
     const errorsBefore = new Set(visibleErrors(doc));
@@ -623,7 +726,10 @@ async function addBlock(
     }, 4000);
     if (appeared) {
       await sleep(300); // la resten av blokken bli tegnet
-      const block = newEmptyControls(doc, before);
+      const fresh = newEmptyControls(doc, before);
+      // Ta med alle nye felt i samme redigeringsboks, også forhåndsutfylte (f.eks. inneværende år).
+      const root = editorRoot(fresh);
+      const block = root ? controlsIn(doc).filter((el) => !before.has(el) && composedContains(root, el)) : fresh;
       log(`${SECTION_LABELS[kind]}: ny blokk med ${block.length} felt`);
       return { block, reason: "" };
     }
@@ -639,6 +745,33 @@ async function addBlock(
         : `klikket på «${label}» ga ingen nye felt`;
   }
   return { block: null, reason };
+}
+
+/** All tekst mellom to elementer i dokumentet (seksjonens innhold). */
+function textBetween(start: Element, end: Element | null): string {
+  const range = start.ownerDocument.createRange();
+  range.setStartAfter(start);
+  if (end) range.setEndBefore(end);
+  else range.setEndAfter(start.ownerDocument.body.lastChild ?? start);
+  return range.toString();
+}
+
+/** Står oppføringen allerede i seksjonen? Sjekker det som identifiserer den (språk, arbeidsgiver …). */
+function entryAlreadyPresent(sectionText: string, entry: Entry, kind: SectionKind): boolean {
+  const e = entry as Record<string, unknown>;
+  const ids: Partial<Record<SectionKind, string[]>> = {
+    languages: ["language"],
+    experiences: ["employer", "title"],
+    volunteering: ["organization", "role"],
+    educations: ["school"],
+    references: ["name"],
+    certifications: ["name"],
+    websites: ["url"],
+  };
+  const values = (ids[kind] ?? []).map((k) => (typeof e[k] === "string" ? norm(e[k] as string) : "")).filter((v) => v.length >= 3);
+  // Nettadresser kan vises uten https://www.
+  if (kind === "websites") return values.some((v) => sectionText.includes(v.replace(/^https? (www )?/, "")));
+  return values.length > 0 && values.every((v) => sectionText.includes(v));
 }
 
 export interface SectionResult {
@@ -663,6 +796,19 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
     if (!payload.overwrite && existing.some((el) => !isEmptyControl(el))) {
       report.status = "skipped-has-value";
       continue;
+    }
+
+    // Oppføringer som allerede er lagt inn (står som tekst i seksjonen), legges ikke inn på nytt.
+    const sectionText = norm(initial.heading ? textBetween(initial.heading, initial.nextHeading ?? null) : initial.container.textContent ?? "");
+    const already = entries.filter((e) => entryAlreadyPresent(sectionText, e, kind));
+    if (already.length) {
+      log(`${SECTION_LABELS[kind]}: ${already.length} finnes fra før, hopper over dem`);
+      entries.splice(0, entries.length, ...entries.filter((e) => !already.includes(e)));
+      if (!entries.length) {
+        report.label = `${SECTION_LABELS[kind]} (alt finnes fra før)`;
+        report.status = "skipped-has-value";
+        continue;
+      }
     }
 
     let done = 0;

@@ -134,7 +134,13 @@ function collectFields(): FieldInfo[] {
     return text(shown?.textContent);
   };
   const out: FieldInfo[] = [];
-  const els = document.querySelectorAll<HTMLElement>(
+  // Let også inni web-komponenter (åpen shadow DOM).
+  const deep = (root: ParentNode, sel: string): HTMLElement[] => {
+    const out = Array.from(root.querySelectorAll<HTMLElement>(sel));
+    root.querySelectorAll("*").forEach((e) => e.shadowRoot && out.push(...deep(e.shadowRoot, sel)));
+    return out;
+  };
+  const els = deep(document, 
     'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=image]):not([type=reset]), textarea, select, button[aria-haspopup="listbox"], [role="combobox"]:not(input)',
   );
   const radioGroups = new Set<string>();

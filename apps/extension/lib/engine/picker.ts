@@ -49,7 +49,7 @@ export function realClick(el: HTMLElement) {
 }
 
 export function key(el: HTMLElement, type: "keydown" | "keyup" | "keypress", k: string) {
-  const e = new KeyboardEvent(type, { key: k, code: k, bubbles: true, cancelable: true });
+  const e = new KeyboardEvent(type, { key: k, code: k, bubbles: true, cancelable: true, composed: true });
   // Eldre kode sjekker keyCode/which (13 = Enter, 27 = Escape).
   const code = k === "Enter" ? 13 : k === "Escape" ? 27 : 0;
   Object.defineProperty(e, "keyCode", { get: () => code });
@@ -269,6 +269,29 @@ export async function pickFromListbox(trigger: HTMLElement, match: OptionMatcher
   return true;
 }
 
+/**
+ * Meny som nedtrekksliste (role="menu" med role="menuitem" som barn, f.eks. Jobbnorges
+ * jn-dropdown-menu). Klikker riktig menyvalg direkte, og åpner menyen først hvis det trengs.
+ */
+export async function pickFromMenu(menu: HTMLElement, match: OptionMatcher): Promise<boolean> {
+  const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+  const i = match(items.map((it) => (it.textContent ?? "").trim()));
+  const item = items[i];
+  if (!item) return false;
+  const text = norm(item.textContent ?? "");
+  const chosen = () =>
+    item.hasAttribute("selected") || item.getAttribute("aria-checked") === "true" || norm(menu.getAttribute("button-text") ?? "") === text;
+  if (chosen()) return true;
+  // Mange menyer lytter på klikk på menyvalgene selv når menyen er lukket. Ellers: åpne først.
+  realClick(item);
+  if (await waitFor(chosen, 600)) return true;
+  const opener = menu.shadowRoot?.querySelector<HTMLElement>('[aria-haspopup], button') ?? menu;
+  realClick(opener);
+  await waitFor(() => isVisible(item), 1000);
+  realClick(item);
+  return Boolean(await waitFor(chosen, 1000));
+}
+
 // ---------------------------------------------------------------- søkefelt
 
 const nonEmpty = <T>(xs: T[]) => (xs.length ? xs : null);
@@ -281,16 +304,16 @@ export function typeLikeUser(el: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   const set = (v: string) => (setter ? setter.call(el, v) : (el.value = v));
   set("");
-  el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteContentBackward" }));
   let current = "";
   for (const ch of value) {
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
-    el.dispatchEvent(new KeyboardEvent("keypress", { key: ch, bubbles: true, cancelable: true }));
-    el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: ch }));
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true, composed: true }));
+    el.dispatchEvent(new KeyboardEvent("keypress", { key: ch, bubbles: true, cancelable: true, composed: true }));
+    el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, composed: true, inputType: "insertText", data: ch }));
     current += ch;
     set(current);
-    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: ch }));
-    el.dispatchEvent(new KeyboardEvent("keyup", { key: ch, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: ch }));
+    el.dispatchEvent(new KeyboardEvent("keyup", { key: ch, bubbles: true, cancelable: true, composed: true }));
   }
 }
 

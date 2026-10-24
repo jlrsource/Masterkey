@@ -1,4 +1,5 @@
 import type { FieldDescriptor } from "@soknadsprofil/shared";
+import { deepQueryAll } from "./util";
 
 export type FillableElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLElement;
 
@@ -244,14 +245,14 @@ export function fillDateSelects(el: HTMLSelectElement, iso: string): number {
  */
 export function simulateFocus(el: HTMLElement) {
   el.focus?.({ preventScroll: true });
-  el.dispatchEvent(new FocusEvent("focus"));
-  el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  el.dispatchEvent(new FocusEvent("focus", { composed: true }));
+  el.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
 }
 
 /** Fokus ut av feltet. Det er her mange skjemaer lagrer og validerer verdien. */
 export function simulateBlur(el: HTMLElement) {
-  el.dispatchEvent(new FocusEvent("blur"));
-  el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  el.dispatchEvent(new FocusEvent("blur", { composed: true }));
+  el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
   el.blur?.();
 }
 
@@ -262,7 +263,9 @@ export function setTextValue(el: HTMLInputElement | HTMLTextAreaElement, value: 
   // Native setter, så React sin verdisporing ser endringen.
   if (setter) setter.call(el, value);
   else el.value = value;
-  el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+  // composed: ekte input-hendelser krysser shadow DOM. Ligger feltet inni en web-komponent
+  // (f.eks. Jobbnorges jn-input), lytter appen på komponenten, ikke på selve feltet.
+  el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: value }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
   simulateBlur(el);
 }
@@ -403,8 +406,10 @@ function smallestSharedAncestor(el: HTMLInputElement): Element | null {
 }
 
 /** Finn grupper av avkrysningsbokser/radioknapper med minst to alternativer. */
-export function scanChoiceGroups(doc: Document | Element): ChoiceGroup[] {
-  const inputs = Array.from(doc.querySelectorAll<HTMLInputElement>(CHOICE_SELECTOR)).filter((el) => !el.disabled);
+export function scanChoiceGroups(doc: Document | Element, opts: { deep?: boolean } = {}): ChoiceGroup[] {
+  const inputs = (opts.deep ? deepQueryAll<HTMLInputElement>(doc, CHOICE_SELECTOR) : Array.from(doc.querySelectorAll<HTMLInputElement>(CHOICE_SELECTOR))).filter(
+    (el) => !el.disabled,
+  );
 
   // 1. Samme name = samme gruppe (vanlig for radioknapper).
   const byName = new Map<string, HTMLInputElement[]>();

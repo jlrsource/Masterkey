@@ -143,6 +143,12 @@
       "platform": "smartrecruiters",
       "file": "Easy apply - Area Sales Manager, Salve - Orkla Health.html",
       "overwrite": true
+    },
+    {
+      "name": "Jobbnorge utdanning åpen (lagret)",
+      "platform": "jobbnorge",
+      "file": "Jobbnorge_med_lagt_til_utdanning.html",
+      "overwrite": true
     }
   ]
 }

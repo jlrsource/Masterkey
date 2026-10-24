@@ -937,5 +937,157 @@ describe("Jobbnorge-mønster: redigeringsboks med «Lagre», én om gangen", () 
     await fillDocument({ profile: { ...profile, references: [] }, files: {}, overwrite: false }, document);
     const ref = Array.from(document.querySelectorAll<HTMLInputElement>('section[data-s="referanser"] .editor input')).map((i) => i.value);
     expect(ref.every((v) => v === "")).toBe(true);
+    // Åpen referanseboks blokkerer «Legg til» i de andre seksjonene, så extensionen venter en stund på hver.
+  }, 60000);
+});
+
+describe("Jobbnorge med web-komponenter (Lit) og Vue-modell (fra lagret side 23. okt)", () => {
+  // Modellen appen lagrer fra. Den oppdateres bare av hendelser som krysser shadow DOM (composed).
+  let model: Record<string, string | boolean> = {};
+
+  function defineComponents() {
+    if (customElements.get("jn-input")) return;
+    class JnInput extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const root = this.attachShadow({ mode: "open" });
+        const type = this.tagName === "JN-NUMBERINPUT" ? "number" : "text";
+        root.innerHTML = `<label for="i">${this.getAttribute("labeltext")}</label><input id="i" type="${type}">`;
+        // Som Jobbnorge: årsfeltene er forhåndsutfylt med inneværende år.
+        if (/ år$/.test(this.getAttribute("labeltext") ?? "")) root.querySelector("input")!.value = String(new Date().getFullYear());
+        // Som Vue: lytter på komponenten (verten). Når bare hendelser som krysser shadow DOM hit.
+        this.addEventListener("input", (e) => (model[this.getAttribute("labeltext")!] = (e.composedPath()[0] as HTMLInputElement).value));
+      }
+    }
+    class JnNumber extends JnInput {}
+    class JnCheckbox extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const root = this.attachShadow({ mode: "open" });
+        root.innerHTML = `<label for="c">${this.getAttribute("labeltext")}</label><input id="c" type="checkbox">`;
+        const box = root.querySelector("input")!;
+        box.addEventListener("change", () => this.dispatchEvent(new CustomEvent("jn-change", { bubbles: true, composed: true })));
+        this.addEventListener("jn-change", () => (model[this.getAttribute("labeltext")!] = box.checked));
+      }
+    }
+    customElements.define("jn-input", JnInput);
+    customElements.define("jn-numberinput", JnNumber);
+    customElements.define("jn-checkbox", JnCheckbox);
+  }
+
+  const months = ["Januar", "Februar", "Mars", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Desember"];
+  const menu = (label: string) =>
+    `<div><label>${label}</label><div role="menu" aria-label="${label}" button-text="Oktober" data-menu="${label}">${months
+      .map((m, i) => `<div id="${i}" role="menuitem"${m === "Oktober" ? " selected" : ""}>${m}</div>`)
+      .join("")}</div></div>`;
+
+  it("finner feltene inni komponentene, og verdiene havner i appens modell før «Lagre»", async () => {
+    defineComponents();
+    model = {};
+    document.body.innerHTML = `
+      <div id="educationSection"><div class="heading-with-help-icon"><h1>Utdanning</h1></div>
+        <button type="button" class="add">Legg til</button><div class="saved"></div><div class="editor"></div></div>
+      <div id="workSection"><h1>Yrkeserfaring</h1><button type="button">Legg til</button></div>`;
+    const editor = document.querySelector(".editor")!;
+    document.querySelector(".add")!.addEventListener("click", () => {
+      setTimeout(() => {
+        editor.innerHTML = `<form class="edit">
+          <fieldset><legend>Hva har du studert?</legend>
+            <jn-input labeltext="Studieretning"></jn-input><jn-input labeltext="Utdanningsinstitusjon "></jn-input>
+            <jn-checkbox labeltext="Har fagbrev"></jn-checkbox>
+            <jn-numberinput labeltext="Studiepoeng / vekttall"></jn-numberinput><jn-input labeltext="Grad"></jn-input></fieldset>
+          <fieldset><legend>Når gjennomførte du studiet?</legend>
+            <jn-checkbox labeltext="Er fortsatt under utdanning"></jn-checkbox>
+            <div class="input-grid">${menu("Fra måned")}<jn-numberinput labeltext="Fra år"></jn-numberinput></div>
+            <div class="input-grid">${menu("Til måned")}<jn-numberinput labeltext="Til år"></jn-numberinput></div></fieldset>
+          <button type="button">Avbryt</button><button type="button" class="save">Lagre</button></form>`;
+        editor.querySelectorAll<HTMLElement>("[role=menuitem]").forEach((item) =>
+          item.addEventListener("click", () => {
+            const m = item.parentElement!;
+            m.querySelectorAll("[role=menuitem]").forEach((x) => x.removeAttribute("selected"));
+            item.setAttribute("selected", "");
+            m.setAttribute("button-text", item.textContent!);
+            model[m.getAttribute("aria-label")!] = item.textContent!;
+          }),
+        );
+        editor.querySelector(".save")!.addEventListener("click", () => {
+          document.querySelector(".saved")!.textContent = JSON.stringify(model);
+          editor.innerHTML = "";
+        });
+      }, 50);
+    });
+
+    const p: FullProfile = {
+      ...profile,
+      educations: [{ school: "NTNU", degree: "Integrert master", field_of_study: "Ingeniørvitenskap & IKT", start_date: "2024-08-01", end_date: "2029-06-01", sort_order: 0 }],
+    };
+    const report = await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    const saved = JSON.parse(document.querySelector(".saved")!.textContent || "{}");
+    expect(saved).toMatchObject({
+      Studieretning: "Ingeniørvitenskap & IKT",
+      "Utdanningsinstitusjon ": "NTNU",
+      Grad: "Integrert master",
+      "Er fortsatt under utdanning": true,
+      "Fra måned": "August",
+      "Fra år": "2024",
+    });
+    expect(saved["Studiepoeng / vekttall"]).toMatch(/^\d+$/);
+    expect(saved["Har fagbrev"]).toBeUndefined();
+    expect(saved["Til år"]).toBeUndefined(); // pågående studium
+    expect(report.fields.find((f) => f.key === "educations")?.label).toBe("Utdanning (1 av 1)");
+  }, 20000);
+});
+
+describe("Jobbnorge: lagrede oppføringer, lenkebeskrivelse", () => {
+  it("legger bare til språk som mangler, selv om en lagret oppføring har egen overskrift", async () => {
+    document.body.innerHTML = `
+      <section><h1>Språk</h1>
+        <div class="saved"><button>Rediger</button><h2>Norsk - bokmål</h2><p>Muntlig: Morsmål, Skriftlig: Morsmål</p></div>
+        <button type="button" class="add">Legg til</button><div class="editor"></div></section>
+      <section><h1>Referanser</h1></section>`;
+    const editor = document.querySelector(".editor")!;
+    document.querySelector(".add")!.addEventListener("click", () => {
+      setTimeout(() => {
+        editor.innerHTML = `<form><label for="l">Språk *</label><select id="l"><option value="">Velg</option><option>Engelsk</option><option>Norsk - bokmål</option></select>
+          <button type="button">Avbryt</button><button type="button" class="save">Lagre</button></form>`;
+        editor.querySelector(".save")!.addEventListener("click", () => {
+          document.querySelector(".saved")!.insertAdjacentHTML("beforeend", `<h2>${(editor.querySelector("select") as HTMLSelectElement).value}</h2>`);
+          editor.innerHTML = "";
+        });
+      }, 50);
+    });
+    const p: FullProfile = {
+      ...profile,
+      languages: [
+        { language: "Norsk", spoken_level: "native", written_level: "native", sort_order: 0 },
+        { language: "Engelsk", spoken_level: "fluent", written_level: "fluent", sort_order: 1 },
+      ],
+    };
+    const report = await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(Array.from(document.querySelectorAll(".saved h2")).map((h) => h.textContent)).toEqual(["Norsk - bokmål", "Engelsk"]);
+    expect(report.fields.find((f) => f.key === "languages")?.label).toBe("Språk (1 av 1)");
+  }, 20000);
+
+  it("skriver «LinkedIn» i lenkebeskrivelsen og URL-en bare i URL-feltet", async () => {
+    document.body.innerHTML = `
+      <section><h1>Linker</h1><button type="button" class="add">Legg til</button><div class="editor"></div><div class="saved"></div></section>`;
+    const editor = document.querySelector(".editor")!;
+    document.querySelector(".add")!.addEventListener("click", () => {
+      setTimeout(() => {
+        editor.innerHTML = `<form><fieldset><legend>Legg til lenke</legend>
+          <label for="u">Nettstedadresse (URL) *</label><input id="u">
+          <textarea id="d" placeholder="Hva handler lenken om?"></textarea></fieldset>
+          <button type="button">Avbryt</button><button type="button" class="save">Lagre</button></form>`;
+        editor.querySelector(".save")!.addEventListener("click", () => {
+          const u = (editor.querySelector("#u") as HTMLInputElement).value;
+          const d = (editor.querySelector("#d") as HTMLTextAreaElement).value;
+          document.querySelector(".saved")!.insertAdjacentHTML("beforeend", `<p>${u} | ${d}</p>`);
+          editor.innerHTML = "";
+        });
+      }, 50);
+    });
+    const p: FullProfile = { ...profile, personal: { ...profile.personal, linkedin_url: "https://linkedin.com/in/kari", github_url: null, website_url: null } };
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(Array.from(document.querySelectorAll(".saved p")).map((x) => x.textContent)).toEqual(["https://linkedin.com/in/kari | LinkedIn"]);
   }, 20000);
 });
