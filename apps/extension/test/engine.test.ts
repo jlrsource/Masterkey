@@ -851,6 +851,7 @@ describe("Jobbnorge-mønster: redigeringsboks med «Lagre», én om gangen", () 
       <fieldset><legend>Hvor har du jobbet?</legend>
         <label for="ag${n}">Arbeidsgiver *</label><input id="ag${n}">
         <label for="st${n}">Stilling *</label><input id="st${n}">
+        <label for="pr${n}">Stillingsprosent</label><input id="pr${n}" type="number">
       </fieldset>
       <fieldset><legend>Når jobbet du i denne stillingen?</legend>
         <label><input type="checkbox" id="fa_${n}"> Fortsatt ansatt</label>
@@ -910,7 +911,7 @@ describe("Jobbnorge-mønster: redigeringsboks med «Lagre», én om gangen", () 
       ...profile,
       experiences: [
         { employer: "Bærum kommune", title: "Assistent", start_date: "2025-01-01", end_date: "2025-06-01", is_current: false, sort_order: 0 },
-        { employer: "Rema 1000", title: "Butikkmedarbeider", start_date: "2022-08-01", end_date: "2024-12-01", is_current: false, sort_order: 1 },
+        { employer: "Rema 1000", title: "Butikkmedarbeider", start_date: "2022-08-01", end_date: "2024-12-01", is_current: false, employment_percentage: 40, sort_order: 1 },
       ],
       educations: [{ school: "NTNU", degree: "Integrert master", field_of_study: "Ingeniørvitenskap & IKT", start_date: "2024-08-01", end_date: "2029-06-01", sort_order: 0 }],
       languages: [{ language: "Engelsk", spoken_level: "fluent", written_level: "conversational", sort_order: 0 }],
@@ -919,7 +920,7 @@ describe("Jobbnorge-mønster: redigeringsboks med «Lagre», én om gangen", () 
     const report = await fillDocument({ profile: p, files: {}, overwrite: false }, document);
     const cards = (s: string) => Array.from(document.querySelectorAll(`section[data-s="${s}"] .card`)).map((c) => c.textContent);
 
-    expect(cards("yrkeserfaring")).toEqual(["Bærum kommune | Assistent | 1 | 2025 | 6 | 2025", "Rema 1000 | Butikkmedarbeider | 8 | 2022 | 12 | 2024"]);
+    expect(cards("yrkeserfaring")).toEqual(["Bærum kommune | Assistent | 100 | 1 | 2025 | 6 | 2025", "Rema 1000 | Butikkmedarbeider | 40 | 8 | 2022 | 12 | 2024"]);
     // Pågående studium: Til-feltene står tomme (standardmåned «Januar» = 1).
     expect(cards("utdanning")).toEqual([expect.stringMatching(/^Ingeniørvitenskap & IKT \| NTNU \| \d+ \| Integrert master \| 8 \| 2024 \| 1 \| $/)]);
     // Skriftlig «godt» → Gode kunnskaper, muntlig «flytende» → Flytende.

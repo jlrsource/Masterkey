@@ -19,7 +19,7 @@ type Values = Record<string, unknown>;
 export interface FieldConfig {
   name: string;
   label: string;
-  type?: "text" | "textarea" | "month" | "date" | "select" | "checkbox" | "email" | "tel" | "url";
+  type?: "text" | "textarea" | "month" | "date" | "select" | "checkbox" | "email" | "tel" | "url" | "number";
   options?: readonly { value: string; label: string }[];
   placeholder?: string;
   wide?: boolean;
@@ -44,7 +44,11 @@ interface ListSectionProps {
 
 /** Dato fra databasen (yyyy-mm-dd) ↔ verdi i <input type="month"> (yyyy-mm). */
 const toInput = (f: FieldConfig, v: unknown) => (f.type === "month" && typeof v === "string" ? v.slice(0, 7) : v);
-const fromInput = (f: FieldConfig, v: unknown) => (f.type === "month" && typeof v === "string" && v.length === 7 ? `${v}-01` : v);
+const fromInput = (f: FieldConfig, v: unknown) => {
+  if (f.type === "month" && typeof v === "string" && v.length === 7) return `${v}-01`;
+  if (f.type === "number" && typeof v === "string") return Number(v.replace(",", "."));
+  return v;
+};
 
 export function ListSection(props: ListSectionProps) {
   const { profile, saveRow, deleteRow, reorder } = useProfile();
@@ -195,7 +199,7 @@ function EntryEditor({ fields, schema, initial, onCancel, onSave, table }: ListS
               </label>
             );
           }
-          const common = { id, name: f.name, placeholder: f.placeholder, "aria-invalid": errors[f.name] ? true : undefined, value: (values[f.name] as string) ?? "" };
+          const common = { id, name: f.name, placeholder: f.placeholder, "aria-invalid": errors[f.name] ? true : undefined, value: values[f.name] == null ? "" : String(values[f.name]) };
           return (
             <Field key={f.name} label={f.label} htmlFor={id} error={errors[f.name]} className={f.wide || f.type === "textarea" ? "sm:col-span-2" : undefined}>
               {f.type === "textarea" ? (

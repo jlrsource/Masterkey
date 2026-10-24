@@ -100,6 +100,7 @@ function normalizeRows(x: CvExtraction): { [S in ImportSection]: ImportRows[S][]
       start_date: cleanDate(e.start_date),
       end_date: e.is_current ? null : cleanDate(e.end_date),
       is_current: e.is_current,
+      employment_percentage: e.employment_percentage >= 1 && e.employment_percentage <= 100 ? Math.round(e.employment_percentage) : null,
       description: cleanText(e.description),
       sort_order: i,
     })),

@@ -33,6 +33,8 @@ export const experienceSchema = z.object({
   start_date: optionalDate,
   end_date: optionalDate,
   is_current: z.boolean().default(false),
+  /** Stillingsprosent (1–100). Tom betyr ikke oppgitt, og extensionen bruker da 100. */
+  employment_percentage: z.number("Skriv et tall").int("Bruk et helt tall").min(1, "Mellom 1 og 100").max(100, "Mellom 1 og 100").nullish(),
   description: optionalText,
 });
 export type Experience = z.infer<typeof experienceSchema>;

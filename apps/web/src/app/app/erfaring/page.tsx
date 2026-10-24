@@ -26,13 +26,14 @@ export default function ErfaringPage() {
           emptyText="Ingen jobber ennå. Klikk her for å legge til din første."
           sortable
           title={(r) => s(r.title) ?? ""}
-          subtitle={(r) => [s(r.employer), s(r.location)].filter(Boolean).join(" · ")}
+          subtitle={(r) => [s(r.employer), s(r.location), typeof r.employment_percentage === "number" && r.employment_percentage < 100 ? `${r.employment_percentage} %` : undefined].filter(Boolean).join(" · ")}
           meta={period}
           body={(r) => s(r.description)}
           fields={[
             { name: "title", label: "Stillingstittel", placeholder: "F.eks. Butikkmedarbeider" },
             { name: "employer", label: "Arbeidsgiver" },
             { name: "location", label: "Sted", placeholder: "Oslo" },
+            { name: "employment_percentage", label: "Stillingsprosent", type: "number", placeholder: "100" },
             { name: "is_current", label: "Jeg jobber her nå", type: "checkbox" },
             { name: "start_date", label: "Startet", type: "month" },
             { name: "end_date", label: "Sluttet", type: "month", hideWhen: (v) => Boolean(v.is_current) },

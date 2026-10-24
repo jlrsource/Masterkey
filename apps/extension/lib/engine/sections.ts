@@ -91,7 +91,7 @@ type BlockKey =
   | "school" | "degree" | "field" | "grade"
   | "language" | "fluent" | "overall" | "spoken" | "written"
   | "url" | "urlType"
-  | "credits"
+  | "credits" | "percentage"
   | "refName" | "refCompany" | "refRole" | "email" | "phone" | "relation"
   | "certName" | "issuer";
 
@@ -140,6 +140,8 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
   ],
   work: [
     ["current", /currently|jobber her|nåværende|pågående|fortsatt|\bcurrent\b|present|\bstill\b/],
+    // Før «title», siden «stillingsprosent» inneholder «stilling».
+    ["percentage", /stillingsprosent|stillingsstørrelse|prosent|percent|\bfte\b|employment (degree|rate)|stillingsandel/],
     ["description", /description|beskrivelse|arbeidsoppgaver|responsibilit|ansvar|oppgaver/],
     ["start", /\bfrom\b|\bfra\b|\bstart/],
     ["end", /\bto\b|\btil\b|\bend\b|slutt/],
@@ -364,6 +366,8 @@ function entryValue(key: BlockKey, entry: Entry, kind: SectionKind): string | bo
     case "start": return kind === "certifications" ? s("issued_date") : s("start_date");
     case "end": return e.is_current || (kind === "educations" && stillStudying(e)) ? null : s("end_date");
     case "credits": return creditsFor(e);
+    // Ikke oppgitt i profilen: de fleste stillinger er heltid.
+    case "percentage": return kind === "experiences" ? String(typeof e.employment_percentage === "number" ? e.employment_percentage : 100) : null;
     case "refName": return s("name");
     case "refCompany": return s("company");
     case "refRole": return s("role");

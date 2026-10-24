@@ -41,6 +41,7 @@ export const cvExtractionSchema = z.object({
         start_date: date("Startdato."),
         end_date: date("Sluttdato. Tom streng hvis pågående."),
         is_current: z.boolean().describe("true hvis stillingen er pågående (f.eks. «nå», «d.d.», «present»)."),
+        employment_percentage: z.number().int().describe("Stillingsprosent 1–100 hvis CV-en oppgir det (f.eks. «50 % stilling», «deltid 40 %», «part-time 60%»). 0 hvis ikke oppgitt."),
         description: text("Ansvar og oppgaver, kort og på originalspråket."),
       }),
     )

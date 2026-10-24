@@ -11,9 +11,9 @@ const emptyPersonal: CvExtraction["personal"] = {
 const extraction: CvExtraction = {
   personal: { ...emptyPersonal, first_name: "Kari", last_name: "Nordmann", email: "kari@ny.no", city: "Bergen", birth_date: "1995-02-30" },
   experiences: [
-    { title: "UX-designer", employer: "Fjord AS", location: "Oslo", start_date: "2021-03-01", end_date: "2023-01-01", is_current: true, description: "" },
-    { title: "Butikkmedarbeider", employer: "Rema 1000", location: "", start_date: "2016", end_date: "", is_current: false, description: "  " },
-    { title: "Butikkmedarbeider", employer: "Rema 1000", location: "", start_date: "", end_date: "", is_current: false, description: "" },
+    { title: "UX-designer", employer: "Fjord AS", location: "Oslo", start_date: "2021-03-01", end_date: "2023-01-01", is_current: true, employment_percentage: 60, description: "" },
+    { title: "Butikkmedarbeider", employer: "Rema 1000", location: "", start_date: "2016", end_date: "", is_current: false, employment_percentage: 0, description: "  " },
+    { title: "Butikkmedarbeider", employer: "Rema 1000", location: "", start_date: "", end_date: "", is_current: false, employment_percentage: 0, description: "" },
   ],
   volunteering: [{ role: "Trener", organization: "IL Brann", location: "", start_date: "", end_date: "", is_current: true, description: "" }],
   educations: [],
@@ -66,6 +66,8 @@ describe("buildCvProposal", () => {
 
   it("nullstiller sluttdato for pågående stillinger og tomme tekster", () => {
     expect(p.lists.experiences[0]?.row.end_date).toBeNull();
+    expect(p.lists.experiences[0]?.row.employment_percentage).toBe(60);
+    expect(p.lists.experiences[1]?.row.employment_percentage).toBeNull(); // 0 = ikke oppgitt
     expect(p.lists.experiences[1]?.row.description).toBeNull();
   });
 
