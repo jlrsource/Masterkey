@@ -13,6 +13,7 @@ import {
   type Classification,
   type FieldKey,
   type FullProfile,
+  type DocLanguage,
 } from "@soknadsprofil/shared";
 import { fillSearchInput, isSearchInput, pickFromListbox } from "./picker";
 import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } from "../types";
@@ -163,6 +164,26 @@ function optionMatcher(key: FieldKey, value: string, profile: FullProfile) {
   };
 }
 
+// Ordgrenser som også virker rundt æøå (\b gjør ikke det).
+const words = (list: string) => new RegExp(`(?<!\\p{L})(${list})(?!\\p{L})`, "giu");
+const NORWEGIAN_WORDS = words("og|ikke|eller|søknad|stilling|fornavn|etternavn|utdanning|erfaring|neste|lagre|velg|på|med|din|ditt|du");
+const ENGLISH_WORDS = words("and|the|or|application|position|first name|last name|education|experience|next|save|select|your|with|you");
+
+/**
+ * Sidens språk: en grov telling av vanlige ord, ellers lang-attributtet.
+ * Teksten vinner når den er tydelig, siden mange sider har lang="en" uansett språk.
+ */
+export function pageLanguage(doc: Document): DocLanguage | null {
+  const text = (doc.body?.innerText || doc.body?.textContent || "").slice(0, 20000);
+  const no = text.match(NORWEGIAN_WORDS)?.length ?? 0;
+  const en = text.match(ENGLISH_WORDS)?.length ?? 0;
+  if (no + en >= 6 && Math.max(no, en) >= 2 * Math.min(no, en)) return no > en ? "no" : "en";
+  const lang = doc.documentElement.lang.toLowerCase();
+  if (/^(nb|nn|no)\b/.test(lang)) return "no";
+  if (/^en\b/.test(lang)) return "en";
+  return no === en ? null : no > en ? "no" : "en";
+}
+
 function base64ToFile(f: FilePayload): File {
   const bin = atob(f.base64);
   const bytes = new Uint8Array(bin.length);
@@ -211,7 +232,11 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
     try {
       if (value.kind === "file") {
         const file = payload.files[key as keyof FillPayload["files"]];
-        if (el instanceof HTMLInputElement && el.type === "file" && file) ok = setFileValue(el, base64ToFile(file));
+        if (el instanceof HTMLInputElement && el.type === "file" && file) {
+          // Felt som tar imot flere filer får også ekstra dokumenter (karakterutskrift) sammen med CV-en.
+          const extras = key === "cvFile" && el.multiple ? (payload.cvExtras ?? []) : [];
+          ok = setFileValue(el, [file, ...extras].map(base64ToFile));
+        }
       } else if (el instanceof HTMLSelectElement && key === "birthDate" && fillDateSelects(el, value.value) > 0) {
         // Dato delt i flere lister (år/måned/dag): alle delene er fylt.
         ok = true;
@@ -299,7 +324,10 @@ export function createEngine(doc: Document = document): EngineApi {
   return {
     analyze() {
       const { matches, adapter } = classifyDocument(doc);
-      return { keys: [...new Set(matches.map((m) => m.result.key))], adapter };
+      const keys = [...new Set(matches.map((m) => m.result.key))];
+      const cvTakesExtras =
+        !keys.includes("diplomaFile") && matches.some((m) => m.result.key === "cvFile" && m.el instanceof HTMLInputElement && m.el.multiple);
+      return { keys, adapter, lang: pageLanguage(doc), cvTakesExtras };
     },
     fill: (payload) => fillDocument(payload, doc),
     clear: () => clearHighlights(doc),

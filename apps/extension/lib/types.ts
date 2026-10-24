@@ -1,4 +1,4 @@
-import type { FieldKey, FullProfile } from "@soknadsprofil/shared";
+import type { DocLanguage, FieldKey, FullProfile } from "@soknadsprofil/shared";
 import type { SectionKind } from "./engine/sections";
 
 export type FileKey = Extract<FieldKey, "cvFile" | "coverLetterFile" | "diplomaFile">;
@@ -12,6 +12,8 @@ export interface FilePayload {
 export interface FillPayload {
   profile: FullProfile;
   files: Partial<Record<FileKey, FilePayload>>;
+  /** Flere filer til et CV-felt som tar imot flere filer («Upload relevant files»), f.eks. karakterutskrift. */
+  cvExtras?: FilePayload[];
   /** Overskriv felt som allerede har en verdi. */
   overwrite: boolean;
 }
@@ -46,8 +48,17 @@ export interface FillSummary {
   at: number;
 }
 
+export interface PageAnalysis {
+  keys: FieldKey[];
+  adapter: string | null;
+  /** Språket på siden, så dokumenter på samme språk kan velges. */
+  lang: DocLanguage | null;
+  /** CV-feltet tar imot flere filer, og siden har ikke eget felt for vitnemål. */
+  cvTakesExtras: boolean;
+}
+
 export interface EngineApi {
-  analyze(): { keys: FieldKey[]; adapter: string | null };
+  analyze(): PageAnalysis;
   fill(payload: FillPayload): Promise<FrameReport>;
   clear(): void;
 }

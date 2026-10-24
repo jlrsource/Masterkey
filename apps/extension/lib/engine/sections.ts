@@ -332,6 +332,12 @@ function stillStudying(e: Record<string, unknown>, today = new Date()): boolean 
   return !end || Number.isNaN(end.getTime()) || end > today;
 }
 
+/** Planlagt sluttdato for en pågående utdanning, hvis profilen har den. */
+function expectedEnd(entry: Entry): string | null {
+  const end = (entry as Record<string, unknown>).end_date;
+  return typeof end === "string" && end.trim() ? end : null;
+}
+
 /** Studiepoeng ut fra antall semestre (30 per semester) fra start til slutt, eller til i dag. */
 function creditsFor(e: Record<string, unknown>, today = new Date()): string | null {
   if (typeof e.start_date !== "string") return null;
@@ -593,11 +599,14 @@ async function fillBlock(block: HTMLElement[], entry: Entry, kind: SectionKind):
   // Avkrysningsboksen «jobber her nå» først: den skjuler ofte sluttdato-feltene.
   assigned.sort((a, b) => Number(b.key === "current") - Number(a.key === "current"));
   const usedKeys = new Set<string>();
+  // Uten «studerer fortsatt»-boks spør feltet etter forventet slutt (Workday «To (Actual or Expected)»).
+  const hasCurrentToggle = assigned.some((a) => a.key === "current");
   for (const { el, key, part } of assigned) {
     if (!key || !el.isConnected) continue;
     const slot = `${key}:${part ?? ""}`;
     if (usedKeys.has(slot)) continue;
-    const value = entryValue(key, entry, kind);
+    let value = entryValue(key, entry, kind);
+    if (key === "end" && value === null && kind === "educations" && !hasCurrentToggle) value = expectedEnd(entry);
     if (value === null || value === false) continue;
     try {
       const ok = await setControl(el, value, key, part, entryContext(entry), aiSearchTerms(entry));

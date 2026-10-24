@@ -3,7 +3,7 @@ import { createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { classifyDocument, fillDocument } from "@/lib/engine/engine";
+import { classifyDocument, createEngine, fillDocument } from "@/lib/engine/engine";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +30,7 @@ const value = (sel: string) => (document.querySelector(sel) as HTMLInputElement)
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  document.documentElement.lang = "";
 });
 
 describe("fillDocument – norsk skjema (Webcruiter-lignende)", () => {
@@ -224,6 +225,44 @@ describe("eneste filfelt uten tekst", () => {
   });
 });
 
+describe("«Upload relevant files» (Workday): flere filer i samme felt", () => {
+  const file = (name: string) => ({ name, mime: "application/pdf", base64: btoa("pdf") });
+  const page = (lang: string, text: string) => {
+    document.documentElement.lang = lang;
+    document.body.innerHTML = `<h2>${text}</h2><label for="f">Upload a file or drop it here</label>
+      <input id="f" data-automation-id="file-upload-input-ref" type="file" multiple>`;
+  };
+
+  it("legger ved karakterutskriften sammen med CV-en, og ser at siden er engelsk", async () => {
+    page("en-US", "Resume/CV. Upload relevant files for your application with the position.");
+    // jsdom har ikke DataTransfer, og input.files kan ikke settes der.
+    class FakeDataTransfer {
+      files: File[] = [];
+      items = { add: (f: File) => this.files.push(f) };
+    }
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    let set: File[] = [];
+    Object.defineProperty(document.getElementById("f")!, "files", { get: () => set, set: (v: File[]) => (set = v) });
+    const engine = createEngine(document);
+    expect(engine.analyze()).toMatchObject({ lang: "en", cvTakesExtras: true });
+    const p = { ...profile, documents: [{ type: "cv" as const, file_name: "CV.pdf", storage_path: "u/cv", is_default: true }] };
+    await engine.fill({ profile: p, files: { cvFile: file("CV.pdf") }, cvExtras: [file("Transcript.pdf")], overwrite: false });
+    const names = Array.from((document.getElementById("f") as HTMLInputElement).files ?? []).map((f) => f.name);
+    expect(names).toEqual(["CV.pdf", "Transcript.pdf"]);
+  });
+
+  it("ser at siden er norsk selv om lang-attributtet sier engelsk", () => {
+    page("en", "Last opp CV og vedlegg til søknaden din. Velg filer og lagre før du går til neste steg på siden med utdanning og erfaring.");
+    expect(createEngine(document).analyze().lang).toBe("no");
+  });
+
+  it("legger ikke ved ekstra filer når siden har eget felt for vitnemål", () => {
+    page("en", "");
+    document.body.insertAdjacentHTML("beforeend", `<label for="d">Transcript</label><input id="d" type="file">`);
+    expect(createEngine(document).analyze().cvTakesExtras).toBe(false);
+  });
+});
+
 describe("spørsmål pakket i mange lag (som «Andre spørsmål»)", () => {
   const question = (text: string, id: string) => `
     <div class="question">
@@ -268,6 +307,9 @@ describe("gjentakende seksjoner (Workday «My Experience»)", () => {
       `<div data-automation-id="formField-${name}"><div><label>${label}</label></div><div class="date">
          <input data-automation-id="dateSectionMonth-input" aria-label="Month" placeholder="MM">
          <input data-automation-id="dateSectionYear-input" aria-label="Year" placeholder="YYYY"></div></div>`;
+    const yearOnly = (name: string, label: string) =>
+      `<div data-automation-id="formField-${name}"><div><label>${label}</label></div><div class="date">
+         <input data-automation-id="dateSectionYear-input" aria-label="Year" placeholder="YYYY"></div></div>`;
     const workBlock = () => `<div class="block"><h4>Work Experience ${n}</h4><button type="button">Delete</button>
         ${field("jobTitle", "Job Title*", `<input id="jobTitle-${n}">`)}
         ${field("companyName", "Company*", `<input id="companyName-${n}">`)}
@@ -281,6 +323,7 @@ describe("gjentakende seksjoner (Workday «My Experience»)", () => {
         ${field("schoolName", "School or University*", `<input id="schoolName-${n}">`)}
         ${field("degree", "Degree*", `<button type="button" aria-haspopup="listbox" id="degree-${n}">Select One</button>`)}
         ${field("fieldOfStudy", "Field of Study", `<input id="fieldOfStudy-${n}">`)}
+        ${yearOnly("firstYearAttended", "From")}${yearOnly("lastYearAttended", "To (Actual or Expected)")}
       </div>`;
     for (const [id, make] of [["work", workBlock], ["edu", eduBlock]] as const) {
       const group = document.getElementById(id)!;
@@ -320,7 +363,8 @@ describe("gjentakende seksjoner (Workday «My Experience»)", () => {
       { title: "Butikkmedarbeider", employer: "Rema 1000", start_date: "2016-06-01", end_date: "2020-08-01", is_current: false, sort_order: 1 },
     ],
     educations: [
-      { school: "NTNU", degree: "Integrert master", field_of_study: "Informatikk", sort_order: 0 },
+      // Pågående studium med forventet slutt.
+      { school: "NTNU", degree: "Integrert master", field_of_study: "Informatikk", start_date: "2024-08-01", end_date: "2099-06-01", sort_order: 0 },
       // Ingen grad i profilen: nivået hentes fra fagfeltet.
       { school: "NHH", degree: null, field_of_study: "Bachelor i økonomi og administrasjon", sort_order: 1 },
     ],
@@ -348,6 +392,9 @@ describe("gjentakende seksjoner (Workday «My Experience»)", () => {
     expect(v("#schoolName-3")).toBe("NTNU");
     expect(document.querySelector("#degree-3")!.textContent).toBe("Master of Science (M.S.)");
     expect(v("#fieldOfStudy-3")).toBe("Informatikk");
+    // Ingen «studerer fortsatt»-boks: «To (Actual or Expected)» får forventet sluttår.
+    const eduYears = Array.from(document.querySelectorAll("#edu .block")[0]!.querySelectorAll<HTMLInputElement>(".date input")).map((i) => i.value);
+    expect(eduYears).toEqual(["2024", "2099"]);
     expect(v("#schoolName-4")).toBe("NHH");
     expect(document.querySelector("#degree-4")!.textContent).toBe("Bachelor of Business (BBus)");
 

@@ -467,10 +467,10 @@ export function setContentEditable(el: HTMLElement, value: string) {
   simulateBlur(el);
 }
 
-export function setFileValue(el: HTMLInputElement, file: File): boolean {
+export function setFileValue(el: HTMLInputElement, files: File | File[]): boolean {
   try {
     const dt = new DataTransfer();
-    dt.items.add(file);
+    for (const file of Array.isArray(files) ? files : [files]) dt.items.add(file);
     el.files = dt.files;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));

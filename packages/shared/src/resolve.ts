@@ -1,4 +1,5 @@
 import { ANSWER_TAG_FIELDS, type FieldKey } from "./fields";
+import { pickDocument } from "./documentLanguage";
 import type { Education, Experience, FullProfile, ProfileDocument } from "./schema";
 
 export type ResolvedValue = { kind: "text"; value: string } | { kind: "file"; document: ProfileDocument };
@@ -17,10 +18,6 @@ export function latestEducation(p: FullProfile): Education | undefined {
   return [...p.educations].sort(byRecent)[0];
 }
 
-function pickDocument(p: FullProfile, type: ProfileDocument["type"]): ProfileDocument | undefined {
-  const docs = p.documents.filter((d) => d.type === type);
-  return docs.find((d) => d.is_default) ?? docs[0];
-}
 
 /** Finn verdien fra profilen som hører til en felttype. */
 export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | null {
@@ -58,15 +55,15 @@ export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | nul
     }
     case "studyCity": return text(latestEducation(p)?.location);
     case "cvFile": {
-      const d = pickDocument(p, "cv");
+      const d = pickDocument(p.documents, "cv");
       return d ? { kind: "file", document: d } : null;
     }
     case "diplomaFile": {
-      const d = pickDocument(p, "diploma");
+      const d = pickDocument(p.documents, "diploma");
       return d ? { kind: "file", document: d } : null;
     }
     case "coverLetterFile": {
-      const d = pickDocument(p, "cover_letter");
+      const d = pickDocument(p.documents, "cover_letter");
       return d ? { kind: "file", document: d } : null;
     }
     default:

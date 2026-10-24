@@ -1,8 +1,8 @@
 import { browser } from "wxt/browser";
-import { emptyProfile, fullProfileSchema, type FullProfile } from "@soknadsprofil/shared";
+import { emptyProfile, fullProfileSchema, pickDocument, type DocLanguage, type FullProfile, type ProfileDocument } from "@soknadsprofil/shared";
 import type { ExtState } from "./messages";
 import { supabase } from "./supabase";
-import type { FileKey, FilePayload, FillPayload, FillSummary, FrameReport } from "./types";
+import type { FileKey, FilePayload, FillPayload, FillSummary, FrameReport, PageAnalysis } from "./types";
 
 export const WEB_APP_URL = import.meta.env.WXT_WEB_APP_URL ?? "http://localhost:3000";
 const PROFILE_KEY = "profile";
@@ -77,22 +77,28 @@ async function downloadAsPayload(path: string, name: string, mime: string | null
   return { name, mime: mime ?? data.type ?? "application/octet-stream", base64: btoa(bin) };
 }
 
-async function filesFor(keys: Set<string>, profile: FullProfile): Promise<FillPayload["files"]> {
+async function filesFor(
+  keys: Set<string>,
+  profile: FullProfile,
+  lang: DocLanguage | null,
+  cvTakesExtras: boolean,
+): Promise<Pick<FillPayload, "files" | "cvExtras">> {
   const want: [FileKey, "cv" | "cover_letter" | "diploma"][] = [
     ["cvFile", "cv"],
     ["coverLetterFile", "cover_letter"],
     ["diplomaFile", "diploma"],
   ];
+  const download = (doc: ProfileDocument | undefined) => (doc ? downloadAsPayload(doc.storage_path, doc.file_name, doc.mime_type) : null);
   const files: FillPayload["files"] = {};
   for (const [key, type] of want) {
     if (!keys.has(key)) continue;
-    const docs = profile.documents.filter((d) => d.type === type);
-    const doc = docs.find((d) => d.is_default) ?? docs[0];
-    if (!doc) continue;
-    const payload = await downloadAsPayload(doc.storage_path, doc.file_name, doc.mime_type);
+    // Karakterutskrift o.l. på samme språk som siden, hvis profilen har flere.
+    const payload = await download(pickDocument(profile.documents, type, lang));
     if (payload) files[key] = payload;
   }
-  return files;
+  // «Upload relevant files»: karakterutskriften kan legges ved sammen med CV-en.
+  const extra = cvTakesExtras && files.cvFile ? await download(pickDocument(profile.documents, "diploma", lang)) : null;
+  return { files, cvExtras: extra ? [extra] : [] };
 }
 
 // ---------------------------------------------------------------- utfylling
@@ -114,13 +120,15 @@ export async function fillActiveTab(overwrite = false): Promise<{ ok: true; summ
     // Steg 1: finn ut hvilke felt som finnes, så vi bare laster ned filer ved behov.
     const analyses = await browser.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
-      func: () => window.__soknadsprofil?.analyze() ?? { keys: [], adapter: null },
+      func: () => window.__soknadsprofil?.analyze() ?? null,
     });
-    const keys = new Set(analyses.flatMap((r) => (r.result as { keys: string[] } | undefined)?.keys ?? []));
-    const files = await filesFor(keys, profile);
+    const pages = analyses.map((r) => r.result as PageAnalysis | null).filter((r): r is PageAnalysis => Boolean(r));
+    const keys = new Set(pages.flatMap((p) => p.keys));
+    const lang = pages.find((p) => p.lang)?.lang ?? null;
+    const { files, cvExtras } = await filesFor(keys, profile, lang, pages.some((p) => p.cvTakesExtras));
 
     // Steg 2: fyll ut i alle rammer.
-    const payload: FillPayload = { profile, files, overwrite };
+    const payload: FillPayload = { profile, files, cvExtras, overwrite };
     const results = await browser.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       func: async (p: FillPayload) => (await window.__soknadsprofil?.fill(p)) ?? null,
