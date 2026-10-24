@@ -229,7 +229,7 @@ describe("«Upload relevant files» (Workday): flere filer i samme felt", () => 
   const file = (name: string) => ({ name, mime: "application/pdf", base64: btoa("pdf") });
   const page = (lang: string, text: string) => {
     document.documentElement.lang = lang;
-    document.body.innerHTML = `<h2>${text}</h2><label for="f">Upload a file or drop it here</label>
+    document.body.innerHTML = `<h2>${text}</h2><label for="f">Resume/CV</label>
       <input id="f" data-automation-id="file-upload-input-ref" type="file" multiple>`;
   };
 
@@ -244,7 +244,7 @@ describe("«Upload relevant files» (Workday): flere filer i samme felt", () => 
     let set: File[] = [];
     Object.defineProperty(document.getElementById("f")!, "files", { get: () => set, set: (v: File[]) => (set = v) });
     const engine = createEngine(document);
-    expect(engine.analyze()).toMatchObject({ lang: "en", cvTakesExtras: true });
+    expect(engine.analyze()).toMatchObject({ lang: "en" });
     const p = { ...profile, documents: [{ type: "cv" as const, file_name: "CV.pdf", storage_path: "u/cv", is_default: true }] };
     await engine.fill({ profile: p, files: { cvFile: file("CV.pdf") }, cvExtras: [file("Transcript.pdf")], overwrite: false });
     const names = Array.from((document.getElementById("f") as HTMLInputElement).files ?? []).map((f) => f.name);
@@ -256,10 +256,19 @@ describe("«Upload relevant files» (Workday): flere filer i samme felt", () => 
     expect(createEngine(document).analyze().lang).toBe("no");
   });
 
-  it("legger ikke ved ekstra filer når siden har eget felt for vitnemål", () => {
+  it("legger ikke ved ekstra filer når siden har eget felt for vitnemål", async () => {
     page("en", "");
     document.body.insertAdjacentHTML("beforeend", `<label for="d">Transcript</label><input id="d" type="file">`);
-    expect(createEngine(document).analyze().cvTakesExtras).toBe(false);
+    class FakeDataTransfer {
+      files: File[] = [];
+      items = { add: (f: File) => this.files.push(f) };
+    }
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    let set: File[] = [];
+    Object.defineProperty(document.getElementById("f")!, "files", { get: () => set, set: (v: File[]) => (set = v) });
+    const p = { ...profile, documents: [{ type: "cv" as const, file_name: "CV.pdf", storage_path: "u/cv", is_default: true }] };
+    await createEngine(document).fill({ profile: p, files: { cvFile: file("CV.pdf") }, cvExtras: [file("Transcript.pdf")], overwrite: false });
+    expect(set.map((f) => f.name)).toEqual(["CV.pdf"]);
   });
 });
 

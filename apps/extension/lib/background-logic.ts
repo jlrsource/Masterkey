@@ -81,7 +81,6 @@ async function filesFor(
   keys: Set<string>,
   profile: FullProfile,
   lang: DocLanguage | null,
-  cvTakesExtras: boolean,
 ): Promise<Pick<FillPayload, "files" | "cvExtras">> {
   const want: [FileKey, "cv" | "cover_letter" | "diploma"][] = [
     ["cvFile", "cv"],
@@ -97,7 +96,8 @@ async function filesFor(
     if (payload) files[key] = payload;
   }
   // «Upload relevant files»: karakterutskriften kan legges ved sammen med CV-en.
-  const extra = cvTakesExtras && files.cvFile ? await download(pickDocument(profile.documents, "diploma", lang)) : null;
+  // Siden avgjør selv om den brukes (bare i felt som tar imot flere filer).
+  const extra = files.cvFile ? (files.diplomaFile ?? (await download(pickDocument(profile.documents, "diploma", lang)))) : null;
   return { files, cvExtras: extra ? [extra] : [] };
 }
 
@@ -125,7 +125,7 @@ export async function fillActiveTab(overwrite = false): Promise<{ ok: true; summ
     const pages = analyses.map((r) => r.result as PageAnalysis | null).filter((r): r is PageAnalysis => Boolean(r));
     const keys = new Set(pages.flatMap((p) => p.keys));
     const lang = pages.find((p) => p.lang)?.lang ?? null;
-    const { files, cvExtras } = await filesFor(keys, profile, lang, pages.some((p) => p.cvTakesExtras));
+    const { files, cvExtras } = await filesFor(keys, profile, lang);
 
     // Steg 2: fyll ut i alle rammer.
     const payload: FillPayload = { profile, files, cvExtras, overwrite };

@@ -19,6 +19,7 @@ import { fillSearchInput, isSearchInput, pickFromListbox } from "./picker";
 import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } from "../types";
 import { findAdapter } from "./adapters";
 import { fillRepeatingSections } from "./sections";
+import { log } from "./util";
 import {
   bestOptionIndex,
   checkOption,
@@ -210,6 +211,9 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   // Sikreste treff først, så de vinner hvis flere felt matcher samme nøkkel.
   matches.sort((a, b) => b.result.confidence - a.result.confidence);
 
+  // Har siden eget felt for vitnemål, skal karakterutskriften dit og ikke sammen med CV-en.
+  const hasDiplomaField = matches.some((m) => m.result.key === "diplomaFile");
+
   for (const { el, result } of matches) {
     const { key, confidence } = result;
     const report: FieldReport = { key, label: FIELD_LABELS[key], confidence, status: "no-value" };
@@ -234,8 +238,13 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
         const file = payload.files[key as keyof FillPayload["files"]];
         if (el instanceof HTMLInputElement && el.type === "file" && file) {
           // Felt som tar imot flere filer får også ekstra dokumenter (karakterutskrift) sammen med CV-en.
-          const extras = key === "cvFile" && el.multiple ? (payload.cvExtras ?? []) : [];
-          ok = setFileValue(el, [file, ...extras].map(base64ToFile));
+          const extras = key === "cvFile" && el.multiple && !hasDiplomaField ? (payload.cvExtras ?? []) : [];
+          const all = [file, ...extras];
+          ok = setFileValue(el, all.map(base64ToFile));
+          // Vis filnavnene i popupen, så brukeren ser hva som ble lagt ved.
+          report.label = `${FIELD_LABELS[key]}: ${all.map((f) => f.name).join(", ")}`;
+          if (key === "cvFile" && el.multiple && !hasDiplomaField && !extras.length) report.label += " (fant ingen vitnemål/karakterutskrift i profilen)";
+          log(`filfelt ${el.multiple ? "(flere filer) " : ""}← ${all.map((f) => f.name).join(", ")} ${ok ? "✓" : "✗"}`);
         }
       } else if (el instanceof HTMLSelectElement && key === "birthDate" && fillDateSelects(el, value.value) > 0) {
         // Dato delt i flere lister (år/måned/dag): alle delene er fylt.
@@ -325,9 +334,7 @@ export function createEngine(doc: Document = document): EngineApi {
     analyze() {
       const { matches, adapter } = classifyDocument(doc);
       const keys = [...new Set(matches.map((m) => m.result.key))];
-      const cvTakesExtras =
-        !keys.includes("diplomaFile") && matches.some((m) => m.result.key === "cvFile" && m.el instanceof HTMLInputElement && m.el.multiple);
-      return { keys, adapter, lang: pageLanguage(doc), cvTakesExtras };
+      return { keys, adapter, lang: pageLanguage(doc) };
     },
     fill: (payload) => fillDocument(payload, doc),
     clear: () => clearHighlights(doc),

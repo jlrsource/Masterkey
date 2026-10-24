@@ -53,8 +53,6 @@ export interface PageAnalysis {
   adapter: string | null;
   /** Språket på siden, så dokumenter på samme språk kan velges. */
   lang: DocLanguage | null;
-  /** CV-feltet tar imot flere filer, og siden har ikke eget felt for vitnemål. */
-  cvTakesExtras: boolean;
 }
 
 export interface EngineApi {
