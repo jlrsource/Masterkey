@@ -19,6 +19,7 @@ import { fillSearchInput, isSearchInput, pickFromListbox } from "./picker";
 import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } from "../types";
 import { findAdapter } from "./adapters";
 import { fillRepeatingSections } from "./sections";
+import { base64ToFile, fillUploadWidgets, findUploadWidgets } from "./uploads";
 import { log } from "./util";
 import {
   bestOptionIndex,
@@ -185,12 +186,6 @@ export function pageLanguage(doc: Document): DocLanguage | null {
   return no === en ? null : no > en ? "no" : "en";
 }
 
-function base64ToFile(f: FilePayload): File {
-  const bin = atob(f.base64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new File([bytes], f.name, { type: f.mime });
-}
 
 /** Ett felt per type for de fleste nøkler. Unntaket er e-post, der «bekreft e-post» også skal fylles. */
 const MULTI_ALLOWED: FieldKey[] = ["email", "country", "city"];
@@ -297,7 +292,11 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   const groups = fillChoiceGroups(payload, doc);
   fields.push(...groups.fields);
 
-  return { url: doc.location?.href ?? "", adapter, detected: matches.length + groups.detected + sections.fields.length, fields, unrecognized };
+  // Vedleggsfelt der filfeltet først dukker opp etter klikk på «+» (SuccessFactors).
+  const uploads = await fillUploadWidgets(payload, doc);
+  fields.push(...uploads);
+
+  return { url: doc.location?.href ?? "", adapter, detected: matches.length + groups.detected + sections.fields.length + uploads.length, fields, unrecognized };
 }
 
 /** Avkrysningsbokser og radioknapper: kryss av alternativet som passer med profilen. */
@@ -333,7 +332,7 @@ export function createEngine(doc: Document = document): EngineApi {
   return {
     analyze() {
       const { matches, adapter } = classifyDocument(doc);
-      const keys = [...new Set(matches.map((m) => m.result.key))];
+      const keys = [...new Set([...matches.map((m) => m.result.key), ...findUploadWidgets(doc).map((w) => w.key)])];
       return { keys, adapter, lang: pageLanguage(doc) };
     },
     fill: (payload) => fillDocument(payload, doc),

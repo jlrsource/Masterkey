@@ -1148,3 +1148,89 @@ describe("Jobbnorge: lagrede oppføringer, lenkebeskrivelse", () => {
     expect(Array.from(document.querySelectorAll(".saved p")).map((x) => x.textContent)).toEqual(["https://linkedin.com/in/kari | LinkedIn"]);
   }, 20000);
 });
+
+describe("SuccessFactors: filfeltet dukker først opp etter klikk på «+» (fra lagret side 26. okt)", () => {
+  const file = (name: string) => ({ name, mime: "application/pdf", base64: btoa("pdf") });
+  function successFactorsPage() {
+    const field = (id: string, label: string, text: string) => `
+      <div class="RCMFormField rcmFormElement attachmentField rowBreak"><label class="rcmFormFieldLabel">${label}</label>
+        <div id="${id}:_attachWrapper"><div id="${id}:_attach" class="attachmentBtn">
+          <div id="${id}:_attachLabel"><span>${text}</span></div>
+          <div role="button" id="${id}:_attachDownloadLabel" class="displayNone"><span id="${id}:_link"></span></div>
+          <span id="${id}:_attachIcon" class="glyphicon glyphicon-plus-sign addAttachments"></span>
+          <div id="${id}:_attachForm" class="displayNone"></div>
+        </div></div>
+      </div>`;
+    document.documentElement.lang = "nb-NO";
+    document.body.innerHTML = `<h2>Mine dokumenter</h2>${field("46", "CV", "Last opp en CV")}${field("48", "Øvrig dokumentasjon", "Legg til et dokument")}`;
+    const uploads: string[] = [];
+    let popup = 0;
+    document.querySelectorAll<HTMLElement>(".addAttachments").forEach((icon) => {
+      const id = icon.id.split(":")[0];
+      icon.onclick = () => {
+        // Som SuccessFactors: en boks med «Last opp fra enhet», og bare én om gangen.
+        document.querySelector(".callout")?.remove();
+        popup++;
+        document.body.insertAdjacentHTML(
+          "beforeend",
+          `<div class="callout" role="dialog"><span id="p${popup}_uploadComputer">Last opp fra enhet</span><input type="file" id="p${popup}_file" class="fileUpload" aria-labelledby="p${popup}_uploadComputer"></div>`,
+        );
+        const input = document.getElementById(`p${popup}_file`) as HTMLInputElement;
+        input.onchange = () => {
+          const name = (input.files as unknown as File[])[0]!.name;
+          document.querySelector(".callout")?.remove();
+          setTimeout(() => {
+            uploads.push(`${id}:${name}`);
+            document.getElementById(`${id}:_link`)!.textContent = name;
+            document.getElementById(`${id}:_attachDownloadLabel`)!.classList.remove("displayNone");
+          }, 100);
+        };
+      };
+    });
+    return uploads;
+  }
+
+  it("ber om CV og karakterutskrift, klikker «+» og laster opp én fil i hvert felt", async () => {
+    const uploads = successFactorsPage();
+    class FakeDataTransfer {
+      files: File[] = [];
+      items = { add: (f: File) => this.files.push(f) };
+    }
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    // jsdom lar ikke input.files settes, så la hvert nye filfelt ta imot filer.
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files")!;
+    const store = new WeakMap<HTMLInputElement, File[]>();
+    Object.defineProperty(HTMLInputElement.prototype, "files", {
+      configurable: true,
+      get(this: HTMLInputElement) {
+        return store.get(this) ?? [];
+      },
+      set(this: HTMLInputElement, v: File[]) {
+        store.set(this, v);
+      },
+    });
+    try {
+      const engine = createEngine(document);
+      const { keys, lang } = engine.analyze();
+      expect(keys).toEqual(expect.arrayContaining(["cvFile", "diplomaFile"]));
+      expect(lang).toBe("no");
+      const report = await engine.fill({
+        profile,
+        files: { cvFile: file("CV.pdf"), diplomaFile: file("Karakterutskrift.pdf") },
+        overwrite: false,
+      });
+      expect(uploads).toEqual(["46:CV.pdf", "48:Karakterutskrift.pdf"]);
+      const files = report.fields.filter((f) => f.key === "cvFile" || f.key === "diplomaFile");
+      expect(files.map((f) => [f.label, f.status])).toEqual([
+        ["CV (fil): CV.pdf", "filled"],
+        ["Vitnemål (fil): Karakterutskrift.pdf", "filled"],
+      ]);
+
+      // Andre gang: allerede lastet opp, så ingenting nytt.
+      await engine.fill({ profile, files: { cvFile: file("CV.pdf"), diplomaFile: file("Karakterutskrift.pdf") }, overwrite: false });
+      expect(uploads).toHaveLength(2);
+    } finally {
+      Object.defineProperty(HTMLInputElement.prototype, "files", desc);
+    }
+  }, 30000);
+});

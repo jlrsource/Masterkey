@@ -66,7 +66,7 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   availability: ["oppstart", "tiltredelse", "oppsigelsestid", "tilgjengelig fra", "start date", "availability", "notice period", "available from", "earliest start"],
   motivation: ["motivasjon", "hvorfor søker du", "hvorfor vil du", "hvorfor oss", "søknadstekst", "motivation", "why do you want", "why are you interested", "cover letter text", "why us"],
   cvFile: ["cv", "resume", "résumé", "curriculum vitae", "last opp cv", "upload cv", "upload resume"],
-  coverLetterFile: ["søknadsbrev", "søknad", "cover letter", "coverletter", "motivasjonsbrev", "letter"],
+  coverLetterFile: ["søknadsbrev", "søknad", "følgebrev", "cover letter", "coverletter", "motivasjonsbrev", "letter"],
   diplomaFile: ["vitnemål", "vitnemal", "attest", "attester", "karakterutskrift", "karakterkort", "diploma", "transcript", "transcripts", "grades"],
 };
 

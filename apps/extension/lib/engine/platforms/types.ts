@@ -23,4 +23,17 @@ export interface PlatformHints {
   listContainers?: string[];
   /** Feilmeldinger som vises når et felt ikke godtas. */
   errors?: string[];
+  /** Vedleggsfelt der filfeltet først dukker opp etter et klikk (f.eks. på «+»). */
+  uploadWidget?: UploadWidgetHint;
+}
+
+export interface UploadWidgetHint {
+  /** Hele feltet, med merkelapp og knapp. */
+  container: string;
+  /** Merkelappen («CV», «Øvrig dokumentasjon»). */
+  label: string;
+  /** Knappen som får filfeltet fram. */
+  trigger: string;
+  /** Finnes når en fil allerede er lastet opp. */
+  uploaded: string;
 }
