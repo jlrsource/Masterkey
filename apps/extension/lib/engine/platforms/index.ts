@@ -1,11 +1,12 @@
 import type { PlatformHints } from "./types";
 import { successfactors } from "./successfactors";
+import { webcruiter } from "./webcruiter";
 import { workday } from "./workday";
 
-export type { PlatformHints, UploadWidgetHint } from "./types";
+export type { PlatformHints, UploadPanelHint, UploadWidgetHint } from "./types";
 
 /** Alle plattform-hint. Legg til nye plattformer her ved behov. */
-export const PLATFORM_HINTS: PlatformHints[] = [workday, successfactors];
+export const PLATFORM_HINTS: PlatformHints[] = [workday, successfactors, webcruiter];
 
 const all = <K extends keyof PlatformHints>(key: K) => PLATFORM_HINTS.flatMap((h) => (h[key] ?? []) as unknown[]) as string[];
 
@@ -15,6 +16,7 @@ export const HINT_LIST_CONTAINERS = all("listContainers");
 export const HINT_ERRORS = all("errors");
 export const HINT_FIELD_CONTAINERS = PLATFORM_HINTS.map((h) => h.fieldContainer).filter((s): s is string => Boolean(s));
 export const HINT_UPLOAD_WIDGETS = PLATFORM_HINTS.map((h) => h.uploadWidget).filter((w): w is NonNullable<typeof w> => Boolean(w));
+export const HINT_UPLOAD_PANELS = PLATFORM_HINTS.map((h) => h.uploadPanel).filter((w): w is NonNullable<typeof w> => Boolean(w));
 export const HINT_SEARCH_MARKERS = PLATFORM_HINTS.map((h) => h.searchInputMarkers).filter((s): s is string => Boolean(s));
 
 /** Plattformens eget navn på feltet, oversatt til en felttype (f.eks. «title»), eller null. */

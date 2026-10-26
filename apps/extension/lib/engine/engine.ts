@@ -19,7 +19,7 @@ import { fillSearchInput, isSearchInput, pickFromListbox } from "./picker";
 import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } from "../types";
 import { findAdapter } from "./adapters";
 import { fillRepeatingSections } from "./sections";
-import { base64ToFile, fillUploadWidgets, findUploadWidgets } from "./uploads";
+import { base64ToFile, fillUploadPanels, fillUploadWidgets, findUploadPanels, findUploadWidgets, uploadPanelInputs } from "./uploads";
 import { log } from "./util";
 import {
   bestOptionIndex,
@@ -34,6 +34,7 @@ import {
   scanFields,
   setContentEditable,
   setFileValue,
+  isVisible,
   setSelectValue,
   setTextValue,
   type FillableElement,
@@ -74,6 +75,8 @@ export function classifyDocument(
     // Innloggingsbokser («Log ind», e-post + passord) hører ikke til søknaden.
     if (inLoginForm(el)) continue;
     const isFile = el instanceof HTMLInputElement && el.type === "file";
+    // Filfelt i et skjult panel (f.eks. Webcruiters «Last opp ny fil» før panelet er åpnet) hører ikke til skjemaet ennå.
+    if (isFile && el.parentElement && !isVisible(el.parentElement)) continue;
     if (isFile) fileInputs++;
     const override = overrides.get(el) ?? (isDialCodeSelect(el) ? "country" : undefined);
     const descriptor = describeField(el);
@@ -197,7 +200,8 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
 
   const classified = classifyDocument(doc);
   const { adapter } = classified;
-  const matches = classified.matches.filter((m) => !sections.handled.has(m.el));
+  const panelInputs = uploadPanelInputs(doc);
+  const matches = classified.matches.filter((m) => !sections.handled.has(m.el) && !panelInputs.has(m.el));
   const unrecognized = classified.unrecognized;
   const used = new Set<FieldKey>();
   /** Tekstfelt vi fylte, for kontrollrunden etterpå. */
@@ -293,7 +297,7 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   fields.push(...groups.fields);
 
   // Vedleggsfelt der filfeltet først dukker opp etter klikk på «+» (SuccessFactors).
-  const uploads = await fillUploadWidgets(payload, doc);
+  const uploads = [...(await fillUploadWidgets(payload, doc)), ...(await fillUploadPanels(payload, doc))];
   fields.push(...uploads);
 
   return { url: doc.location?.href ?? "", adapter, detected: matches.length + groups.detected + sections.fields.length + uploads.length, fields, unrecognized };
@@ -332,7 +336,14 @@ export function createEngine(doc: Document = document): EngineApi {
   return {
     analyze() {
       const { matches, adapter } = classifyDocument(doc);
-      const keys = [...new Set([...matches.map((m) => m.result.key), ...findUploadWidgets(doc).map((w) => w.key)])];
+      const keys = [
+        ...new Set([
+          ...matches.map((m) => m.result.key),
+          ...findUploadWidgets(doc).map((w) => w.key),
+          // Vedleggspanel: CV-en (og karakterutskriften, som følger med CV-en) lastes opp der.
+          ...(findUploadPanels(doc).length ? (["cvFile"] as const) : []),
+        ]),
+      ];
       return { keys, adapter, lang: pageLanguage(doc) };
     },
     fill: (payload) => fillDocument(payload, doc),

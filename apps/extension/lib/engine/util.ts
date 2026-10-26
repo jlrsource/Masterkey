@@ -53,3 +53,22 @@ export function commonAncestor(els: Element[]): Element | null {
   while (node && !els.every((e) => composedContains(node!, e))) node = composedParent(node);
   return node;
 }
+
+/**
+ * Fører et klikk på elementet til en annen side? Lenker som bare bytter #-delen (Webcruiters
+ * «#workexperience/0») er trygge. Andre lenker klikker vi aldri: brukeren kan miste det som er fylt ut.
+ */
+export function leavesPage(el: Element): boolean {
+  const a = el.closest("a[href]") as HTMLAnchorElement | null;
+  if (!a) return false;
+  const href = a.getAttribute("href") ?? "";
+  if (href === "" || href.startsWith("#") || /^javascript:/i.test(href)) return false;
+  try {
+    const target = new URL(a.href, el.ownerDocument.baseURI);
+    const here = new URL(el.ownerDocument.location?.href ?? el.ownerDocument.baseURI);
+    // Samme side med andre sporingsparametere (?_sp=…) regnes som samme side.
+    return target.origin + target.pathname !== here.origin + here.pathname;
+  } catch {
+    return true;
+  }
+}

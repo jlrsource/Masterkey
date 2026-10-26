@@ -1234,3 +1234,182 @@ describe("SuccessFactors: filfeltet dukker først opp etter klikk på «+» (fra
     }
   }, 30000);
 });
+
+describe("Webcruiter: «Legg til på CV»-meny, «Ny referanse», vedlegg, og MasterCV røres ikke (fra lagret side 26. okt)", () => {
+  const file = (name: string) => ({ name, mime: "application/pdf", base64: btoa("pdf") });
+  const radio = (name: string, q: string) => `
+    <div><label class="control-label" for="CurrentEmployment">${q}</label>
+      <span class="small" title="If “Yes” then “To” field above should be empty or future date"><i class="fa fa-info-circle"></i>Hvis "Ja" må "Til"-feltet være tomt eller vise en fremtidig dato</span>
+      <ul data-role="radiogroup" class="k-radio-list" role="radiogroup">
+        <li><input type="radio" name="${name}" id="${name}Yes" value="yes"><label for="${name}Yes"><span>Ja</span></label></li>
+        <li><input type="radio" name="${name}" id="${name}No" value="no" checked><label for="${name}No"><span>Nei</span></label></li>
+      </ul></div>`;
+  const field = (id: string, label: string, type = "text") =>
+    type === "textarea" ? `<div><label for="${id}">${label}</label><textarea id="${id}" data-value-update="keyup" onkeyup="this.dataset.model = this.value"></textarea></div>` : `<div><label for="${id}">${label}</label><input id="${id}" type="${type}"></div>`;
+  const levels = (name: string, q: string) =>
+    `<label for="${q}">${q}</label><fieldset>${["Ingen", "Noe", "Godt", "Meget godt"].map((l, i) => `<label class="btn"><input type="radio" name="${name}" value="${i * 10}"${i === 0 ? " checked" : ""}><span class="sr-only">${q}</span> ${l}</label>`).join("")}</fieldset>`;
+  const editors: Record<string, () => string> = {
+    Arbeidserfaring: () =>
+      field("From", "Fra * F.eks oktober 2021", "month") + field("To", "Til * F.eks oktober 2021", "month") + radio("ongoing", "Nåværende stilling?") +
+      field("EmploymentDegree", "Stillingsprosent (0-100)", "number") + field("Title", "Tittel * F.eks. Kommunikasjonsrådgiver") +
+      field("Employer", "Arbeidsgiver * F.eks. IKEA Slependen") + field("Comment", "Kommentar F.eks. bidra til sosiale aktiviteter", "textarea"),
+    Utdanning: () =>
+      field("From", "Fra *", "month") + field("To", "Til *", "month") + radio("ongoing", "Nåværende?") +
+      field("Title", "Utdanningstittel * F.eks. Master i internasjonale studier") + field("School", "Skole * F.eks. Universitetet i Oslo") + field("Comment", "Kommentar", "textarea"),
+    "Kurs/sertifisering": () =>
+      field("From", "Fra * dd.mm.åååå", "date") + field("To", "Til * dd.mm.åååå", "date") + radio("ongoing", "Nåværende?") +
+      field("Title", "Kurstittel * F.eks. Ledelse") + field("School", "Kursarrangør * F.eks. Prosjektskolen") + field("Comment", "Kommentar", "textarea"),
+    "Annen erfaring": () =>
+      field("From", "Fra *", "month") + field("To", "Til *", "month") + radio("ongoing", "Nåværende?") +
+      field("Description", "Beskrivelse * F.eks. Fødselspermisjon") + field("Comment", "Kommentar", "textarea"),
+    Språkkunnskaper: () =>
+      `<label for="LanguageName">Språk *</label><select id="LanguageName"><option value="">Velg</option><option value="1">Engelsk</option><option value="2">Norsk</option></select>` +
+      levels("spoken", "Muntlig") + levels("written", "Skriftlig"),
+  };
+
+  function webcruiterPage() {
+    document.documentElement.lang = "nb-NO";
+    document.body.innerHTML = `
+      <form id="otherexperience-form" style="display:none"><label for="Title">Beskrivelse *</label></form>
+      <div class="panel"><h2 class="element-header">CV *</h2>
+        <div class="dropdown"><button type="button" id="addToCvMenu" data-toggle="dropdown" aria-haspopup="true">Legg til på CV</button>
+          <ul class="dropdown-menu" aria-labelledby="addToCvMenu"><li>* Obligatorisk</li>
+            ${["Arbeidserfaring *", "Utdanning *", "Kurs/sertifisering", "Sertifikat", "Spesialisering", "Annen erfaring", "Prosjekt", "Språkkunnskaper", "Tilleggsinformasjon"].map((t) => `<li><a href="#" data-item="${t.replace(" *", "")}">${t}</a></li>`).join("")}
+          </ul></div>
+        <label><input type="checkbox" id="noWork"> Jeg har ingen arbeidserfaring</label>
+        <label><input type="checkbox" id="noEdu"> Jeg har ingen utdanning</label>
+        <div id="cvList"></div><div id="cvEditor"></div>
+      </div>
+      <div class="panel"><h2 class="element-header">Referanser</h2>
+        <div class="tips">Tips - Du kan for eksempel bruke en tidligere kollega, sjef eller lærer som referanse. Det er lurt å spørre dem om de ønsker å være referanse for deg, så er de forberedt dersom de blir kontaktet av den mulig nye arbeidsgiveren din. Les mer her om hvordan du velger gode referanser til søknaden din.</div>
+        <div id="referenceList"><div>
+          <h3>Velg referanser fra nedtrekksmenyen, eller lag en ny:</h3>
+          <label for="refDrp">MasterCV-referanse</label>
+          <div class="form-inline"><select id="refDrp"><option value="null">Velg referanse</option><option value="1">Linda Lagret</option><option value="2">Ola Leder</option></select>
+            <button type="button" id="masterAdd" aria-label="Legg til referanser">Legg til</button></div>
+        </div><div id="references"></div></div>
+        <div id="referenceDetail"></div>
+        <div class="pv-lg"><button type="button" id="newRef" title="Legg til referanser"><span>Ny referanse</span></button></div>
+      </div>
+      <div class="panel"><h2 class="element-header">Vedlegg</h2>
+        <div id="attachment-list-view"><div style="display:none" class="hidden-row">CV.pdf</div>Ingen vedlegg er lagt til</div>
+        <button id="addVerifiedAttachmentBtn" type="button">Hent ditt vitnemål fra Vitnemålsportalen</button>
+        <button id="addAttachmentBtn" type="button">Legg til vedlegg</button>
+        <div id="selectPanel" style="display:none">
+          <h3>Vedlegg i MasterCV</h3><a role="button">Velg alle</a>
+          <label><input type="checkbox" class="master"> CV_Gammel.pdf</label>
+          <div class="k-upload"><div class="k-upload-button" aria-label="Last opp ny fil..."><input type="file" id="select-attachments" multiple><span>Last opp ny fil...</span></div><ul class="k-upload-files"></ul></div>
+          <a class="btn btn-save" role="button" id="attSave">Lagre</a><a role="button">Avbryt</a>
+        </div>
+      </div>`;
+
+    const saved: string[] = [];
+    const editor = document.getElementById("cvEditor")!;
+    const values = (root: Element) =>
+      [
+        // Kommentarfeltet: modellen oppdateres bare ved tastetrykk (som Kendo «data-value-update=keyup»).
+        ...Array.from(root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input:not([type=radio]), textarea, select")).map((i) =>
+          i instanceof HTMLSelectElement ? i.selectedOptions[0]?.text ?? "" : i instanceof HTMLTextAreaElement ? i.dataset.model ?? "" : i.value,
+        ),
+        ...Array.from(root.querySelectorAll<HTMLInputElement>("input[type=radio]:checked")).map((r) => r.parentElement!.textContent!.replace(/Muntlig|Skriftlig/, "").trim()),
+      ].join(" | ");
+    document.querySelectorAll<HTMLAnchorElement>(".dropdown-menu a").forEach((a) =>
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const item = a.dataset.item!;
+        setTimeout(() => {
+          editor.innerHTML = `<form>${editors[item]?.() ?? ""}<div class="cv-footer"><a class="btn btn-save">&nbsp;Lagre&nbsp;</a><a class="btn btn-link cancel">Avbryt</a></div></form>`;
+          editor.querySelector(".btn-save")!.addEventListener("click", () => {
+            // Som Webcruiter: avvis uten «Til» eller «Nåværende», og språk uten nivå.
+            const ongoing = editor.querySelector<HTMLInputElement>("input[name=ongoing][value=yes]");
+            const to = editor.querySelector<HTMLInputElement>("#To");
+            if (ongoing && to && !to.value && !ongoing.checked) return void editor.querySelector("form")!.insertAdjacentHTML("afterbegin", "<p>Til eller Nåværende må fylles ut</p>");
+            if (item === "Språkkunnskaper" && !editor.querySelector("input[type=radio]:checked")) return void editor.querySelector("form")!.insertAdjacentHTML("afterbegin", "<p>Nivå må velges for Muntlig eller Skriftlig</p>");
+            saved.push(`${item}: ${values(editor)}`);
+            document.getElementById("cvList")!.insertAdjacentHTML("beforeend", `<div>${values(editor)}</div>`);
+            editor.innerHTML = "";
+          });
+        }, 50);
+      }),
+    );
+    document.getElementById("masterAdd")!.addEventListener("click", () => saved.push("MasterCV-referanse lagt til"));
+    document.getElementById("newRef")!.addEventListener("click", () => {
+      const detail = document.getElementById("referenceDetail")!;
+      setTimeout(() => {
+        detail.innerHTML = `<form><b>Ny referanse:</b>${field("Name", "Fornavn og etternavn * Navn")}${field("Phone", "Telefon * Din referanses telefonnummer")}${field("Email", "E-post Din referanses e-post")}${field("Relation", "Vår relasjon * F.eks. Min avdelingsleder på IKEA")}<a class="btn btn-save">&nbsp;Lagre&nbsp;</a></form>`;
+        detail.querySelector(".btn-save")!.addEventListener("click", () => {
+          saved.push(`Referanse: ${values(detail)}`);
+          document.getElementById("references")!.insertAdjacentHTML("beforeend", `<div>${values(detail)}</div>`);
+          detail.innerHTML = "";
+        });
+      }, 50);
+    });
+    const panel = document.getElementById("selectPanel")!;
+    document.getElementById("addVerifiedAttachmentBtn")!.addEventListener("click", () => saved.push("Vitnemålsportalen åpnet"));
+    document.getElementById("addAttachmentBtn")!.addEventListener("click", () => (panel.style.display = ""));
+    const input = document.getElementById("select-attachments") as HTMLInputElement;
+    input.addEventListener("change", () => {
+      // Som Kendo Upload: laster opp med en gang og merker hver fil som ferdig.
+      // Kendo viser filnavnet med en gang (under opplasting), og raden i listen først når filen er ferdig.
+      (input.files as unknown as File[]).forEach((f, i) => {
+        panel.querySelector(".k-upload-files")!.insertAdjacentHTML("beforeend", `<li class="k-file k-file-progress" data-name="${f.name}">${f.name}</li>`);
+        setTimeout(() => {
+          panel.querySelector(`.k-file[data-name="${f.name}"]`)!.className = "k-file k-file-success-hidden";
+          panel.querySelector(".master")!.parentElement!.insertAdjacentHTML("afterend", `<label><input type="checkbox" class="uploaded" checked> ${f.name}</label>`);
+        }, 100 + i * 600);
+      });
+    });
+    document.getElementById("attSave")!.addEventListener("click", () => {
+      const names = Array.from(panel.querySelectorAll<HTMLInputElement>(".uploaded:checked")).map((c) => c.parentElement!.textContent!.trim()).reverse();
+      saved.push(`Vedlegg: ${names.join(", ")}`);
+      document.getElementById("attachment-list-view")!.textContent = names.join(" ");
+      panel.style.display = "none";
+    });
+    return saved;
+  }
+
+  it("fyller alt via menyer og knapper, laster opp vedlegg og rører ikke MasterCV", async () => {
+    const saved = webcruiterPage();
+    class FakeDataTransfer {
+      files: File[] = [];
+      items = { add: (f: File) => this.files.push(f) };
+    }
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    let set: File[] = [];
+    Object.defineProperty(document.getElementById("select-attachments")!, "files", { get: () => set, set: (v: File[]) => (set = v) });
+
+    const p: FullProfile = {
+      ...profile,
+      experiences: [
+        { employer: "Bærum kommune", title: "Assistent", start_date: "2025-01-01", end_date: "2025-06-01", is_current: false, employment_percentage: 50, description: "Elevarbeid", sort_order: 0 },
+        { employer: "Fjord AS", title: "UX-designer", start_date: "2023-08-01", is_current: true, sort_order: 1 },
+      ],
+      educations: [{ school: "NTNU", degree: "Integrert master", field_of_study: "Informatikk", start_date: "2024-08-01", end_date: "2099-06-01", sort_order: 0 }],
+      certifications: [{ name: "Førstehjelp", issuer: "Røde Kors", issued_date: "2023-05-10", sort_order: 0 }],
+      volunteering: [{ organization: "Elevrådet", role: "Leder", start_date: "2020-08-01", end_date: "2021-06-01", is_current: false, sort_order: 0 }],
+      languages: [{ language: "Engelsk", spoken_level: "fluent", written_level: "conversational", sort_order: 0 }],
+      references: [{ name: "Ola Leder", company: "Bærum kommune", role: "Rektor", email: "ola@example.no", phone: "+47 400 00 000", sort_order: 0 }],
+    };
+    const engine = createEngine(document);
+    expect(engine.analyze().keys).toContain("cvFile");
+    const report = await engine.fill({ profile: p, files: { cvFile: file("CV.pdf") }, cvExtras: [file("Karakterutskrift.pdf")], overwrite: false });
+
+    expect(saved).toEqual([
+      "Arbeidserfaring: 2025-01 | 2025-06 | 50 | Assistent | Bærum kommune | Elevarbeid | Nei",
+      "Arbeidserfaring: 2023-08 |  | 100 | UX-designer | Fjord AS |  | Ja",
+      "Utdanning: 2024-08 | 2099-06 | Integrert master i Informatikk | NTNU |  | Ja",
+      "Kurs/sertifisering: 2023-05-10 | 2023-05-10 | Førstehjelp | Røde Kors |  | Nei",
+      "Annen erfaring: 2020-08 | 2021-06 | Leder, Elevrådet |  | Nei",
+      "Språkkunnskaper: Engelsk | Meget godt | Godt",
+      "Referanse: Ola Leder | +47 400 00 000 | ola@example.no | Rektor, Bærum kommune",
+      "Vedlegg: CV.pdf, Karakterutskrift.pdf",
+    ]);
+    // MasterCV og «ingen erfaring»-boksene er urørt.
+    expect((document.getElementById("refDrp") as HTMLSelectElement).value).toBe("null");
+    expect((document.querySelector(".master") as HTMLInputElement).checked).toBe(false);
+    expect((document.getElementById("noWork") as HTMLInputElement).checked).toBe(false);
+    expect((document.getElementById("noEdu") as HTMLInputElement).checked).toBe(false);
+    const labels = report.fields.filter((f) => ["experiences", "educations", "certifications", "volunteering", "languages", "references"].includes(f.key)).map((f) => f.label);
+    expect(labels).toEqual(expect.arrayContaining(["Arbeidserfaring (2 av 2)", "Utdanning (1 av 1)", "Referanser (1 av 1)"]));
+  }, 60000);
+});

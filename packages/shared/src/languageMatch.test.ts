@@ -18,6 +18,13 @@ describe("languageOptionIndex", () => {
 });
 
 describe("languageLevelOptionIndex", () => {
+  it("forstår Webcruiters skala (Ingen/Noe/Godt/Meget godt), også med «Muntlig» foran", () => {
+    const wc = ["Muntlig Ingen", "Muntlig Noe", "Muntlig Godt", "Muntlig Meget godt"];
+    expect(wc[languageLevelOptionIndex(wc, "native")]).toBe("Muntlig Meget godt");
+    expect(wc[languageLevelOptionIndex(wc, "fluent")]).toBe("Muntlig Meget godt");
+    expect(wc[languageLevelOptionIndex(wc, "conversational")]).toBe("Muntlig Godt");
+    expect(wc[languageLevelOptionIndex(wc, "basic")]).toBe("Muntlig Noe");
+  });
   const workday = ["Select One", "Beginner", "Intermediate", "Advanced", "Fluent", "Native"];
   const linkedin = ["Elementary proficiency", "Limited working proficiency", "Professional working proficiency", "Full professional proficiency", "Native or bilingual proficiency"];
   it("treffer riktig nivå", () => {

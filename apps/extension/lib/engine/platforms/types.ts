@@ -25,6 +25,19 @@ export interface PlatformHints {
   errors?: string[];
   /** Vedleggsfelt der filfeltet først dukker opp etter et klikk (f.eks. på «+»). */
   uploadWidget?: UploadWidgetHint;
+  /** Vedleggspanel som åpnes med en knapp, der flere filer lastes opp og panelet lagres. */
+  uploadPanel?: UploadPanelHint;
+}
+
+export interface UploadPanelHint {
+  /** Knappen som åpner panelet («Legg til vedlegg»). */
+  trigger: string;
+  /** Filfeltet i panelet. */
+  input: string;
+  /** Listen over vedlegg som allerede er lagt ved (filnavnene står der). */
+  attached: string;
+  /** Én per fil som er ferdig lastet opp. */
+  uploaded: string;
 }
 
 export interface UploadWidgetHint {

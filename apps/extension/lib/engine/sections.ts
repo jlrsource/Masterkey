@@ -18,7 +18,7 @@ import {
 import type { FieldReport, FillPayload } from "../types";
 import { HINT_ERRORS, hintedFieldKey } from "./platforms";
 import { fillSearchInput, isSearchInput, pickFromListbox, pickFromMenu, realClick, type OptionMatcher } from "./picker";
-import { commonAncestor, composedContains, composedParent, deepQueryAll, describeEl, documentHost, log, sleep, waitFor } from "./util";
+import { commonAncestor, composedContains, composedParent, deepQueryAll, describeEl, documentHost, leavesPage, log, sleep, waitFor } from "./util";
 import {
   bestOptionIndex,
   checkOption,
@@ -61,7 +61,8 @@ const MAX_ENTRIES = 10;
 const SECTION_PATTERNS: [SectionKind, RegExp][] = [
   // Andre personer først: disse skal aldri få brukerens egne opplysninger.
   ["references", /referanse|\breferences?\b|referees?|attestant/],
-  ["volunteering", /volunt|frivillig|\bverv\b/],
+  // «Annen erfaring» (Webcruiter) er stedet for verv og frivillig arbeid.
+  ["volunteering", /volunt|frivillig|\bverv\b|annen erfaring|other experience/],
   ["certifications", /\bkurs\b|\bcourses?\b|sertifikat|sertifisering|certific|licen[sc]e|lisens/],
   ["languages", /\blanguages?\b|\bspråk/],
   ["websites", /\bwebsites?\b|\bnettsider?\b|\bnettsteder\b|\blinks\b|\blenker\b|\blinker\b|online profiles?/],
@@ -69,12 +70,32 @@ const SECTION_PATTERNS: [SectionKind, RegExp][] = [
   ["experiences", /work experience|employment|work history|arbeidserfaring|yrkeserfaring|arbeidsforhold|erfaring|experience/],
 ];
 
-/** «Add», «Add Another», «Legg til ny», «Add Work Experience» – men ikke «Add attachment». */
+/** «Add», «Add Another», «Legg til ny», «Add Work Experience», «Ny referanse» – men ikke «Add attachment». */
 function isAddLabel(text: string): boolean {
-  const m = /^\+?\s*(add|legg til)(\s+(another|more|new|ny|nytt|en|et|flere))?(\s+(.*))?$/.exec(text);
-  if (!m) return false;
-  const rest = m[5] ?? "";
+  const rest = addLabelRest(text);
+  if (rest === null) return false;
+  // «Ny»/«New» alene er ikke en «Legg til»-knapp, bare sammen med hva som legges til.
+  if (/^(ny|nytt|new)\b/.test(text)) return rest !== "" && kindFromText(rest) !== null;
   return rest === "" || kindFromText(rest) !== null;
+}
+
+/** Det som står etter «Legg til»/«Add» («referanse» i «Ny referanse»), eller null hvis det ikke er en slik knapp. */
+function addLabelRest(text: string): string | null {
+  const m = /^\+?\s*(add|legg til|ny|nytt|new)(\s+(another|more|new|ny|nytt|en|et|flere))?(\s+(.*))?$/.exec(text);
+  return m ? (m[5] ?? "") : null;
+}
+
+/**
+ * Webcruiters «MasterCV» er CV-en brukeren har lagret hos plattformen. Lister og knapper for den
+ * («Velg referanse [Legg til]», «Vedlegg i MasterCV») skal extensionen ikke røre.
+ */
+export function inMasterCv(el: Element): boolean {
+  let node: Element | null = el.parentElement;
+  for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+    const t = node.textContent ?? "";
+    if (t.length < 400 && /master\s?-?cv/i.test(t)) return true;
+  }
+  return false;
 }
 
 /** Alt som kan fylles ut i en blokk, inkludert egendefinerte nedtrekkslister. */
@@ -93,7 +114,8 @@ type BlockKey =
   | "url" | "urlType"
   | "credits" | "percentage"
   | "refName" | "refCompany" | "refRole" | "email" | "phone" | "relation"
-  | "certName" | "issuer";
+  | "certName" | "issuer"
+  | "comment" | "eduTitle";
 
 /** Felt som alltid er avkrysningsbokser (og bare de). */
 const CHECKBOX_KEYS: BlockKey[] = ["current", "fluent"];
@@ -124,6 +146,8 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
     ["issuer", /utsteder|arrangør|issuer|institusjon|institution|tilbyder|provider|organisasjon|skole/],
     ["url", /url|lenke|link/],
     ["start", /dato|\bdate\b|fullført|completed|\bår\b|\byear\b|\bfra\b|\bfrom\b/],
+    ["comment", /kommentar|comment/],
+    ["end", /\btil\b|\bto\b|utløp|expir/],
     ["certName", /navn|\bname\b|kurs|sertifikat|tittel|\btitle\b|certific/],
   ],
   website: [
@@ -140,6 +164,7 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
   ],
   work: [
     ["current", /currently|jobber her|nåværende|pågående|fortsatt|\bcurrent\b|present|\bstill\b/],
+    ["comment", /kommentar|comment/],
     // Før «title», siden «stillingsprosent» inneholder «stilling».
     ["percentage", /stillingsprosent|stillingsstørrelse|prosent|percent|\bfte\b|employment (degree|rate)|stillingsandel/],
     ["description", /description|beskrivelse|arbeidsoppgaver|responsibilit|ansvar|oppgaver/],
@@ -150,12 +175,15 @@ const FIELD_PATTERNS: Record<FieldGroup, [BlockKey, RegExp][]> = {
     ["location", /location|arbeidssted|\bsted\b|\bcity\b|\bby\b/],
   ],
   education: [
-    ["current", /fortsatt|under utdanning|currently|ongoing|pågående|studerer|in progress|still studying/],
+    ["current", /fortsatt|under utdanning|currently|ongoing|pågående|studerer|in progress|still studying|nåværende/],
+    ["comment", /kommentar|comment/],
+    // «Utdanningstittel» (Webcruiter): grad og fag i ett, «Master i informatikk».
+    ["eduTitle", /utdanningstittel|education title|degree title/],
     ["credits", /studiepoeng|vekttall|\bcredits?\b|\bects\b/],
     ["description", /description|beskrivelse/],
     ["start", /\bfrom\b|\bfra\b|\bstart|first year/],
     ["end", /\bto\b|\btil\b|\bend\b|slutt|last year|graduat|ferdig/],
-    ["field", /field of study|fagfelt|studieretning|\bmajor\b|discipline|studium|studiet|studieprogram/],
+    ["field", /field of study|fagfelt|studieretning|utdanningsretning|\bmajor\b|discipline|studium|studiet|studieprogram/],
     ["school", /school|university|universitet|skole|lærested|institution|institusjon|lærestad|college|høgskole|høgskule/],
     ["degree", /degree|\bgrad\b|utdanningsnivå|nivå/],
     ["grade", /gpa|\bgrade\b|karakter|snitt|overall result/],
@@ -171,7 +199,8 @@ function controlsIn(root: ParentNode): HTMLElement[] {
       (el.getAttribute("role") !== "menu" || isMenuDropdown(el)) &&
       isVisible(el) &&
       !(el as HTMLInputElement).disabled &&
-      el.getAttribute("aria-hidden") !== "true",
+      el.getAttribute("aria-hidden") !== "true" &&
+      !inMasterCv(el),
   );
 }
 
@@ -189,6 +218,8 @@ interface Section {
   kind: SectionKind;
   /** «Legg til»-knappen. Mangler når en redigeringsboks allerede er åpen (knappen er da skjult). */
   addButton: HTMLElement | null;
+  /** Menyknappen som må åpnes før «Legg til» (Webcruiters «Legg til på CV» → «Arbeidserfaring»). */
+  opener?: HTMLElement;
   container: Element;
   /** Seksjonens overskrift og neste seksjons overskrift: alt mellom dem hører til seksjonen. */
   heading?: HTMLElement;
@@ -210,8 +241,33 @@ function sectionControls(doc: Document, section: Section): HTMLElement[] {
 function findAddButtons(doc: Document): HTMLElement[] {
   return Array.from(doc.querySelectorAll<HTMLElement>('button, [role="button"], a')).filter((b) => {
     const t = norm(b.getAttribute("aria-label") || b.textContent || "");
-    return t.length < 60 && isAddLabel(t) && isVisible(b) && !(b as HTMLButtonElement).disabled;
+    return t.length < 60 && isAddLabel(t) && isVisible(b) && !(b as HTMLButtonElement).disabled && !inMasterCv(b) && !leavesPage(b);
   });
+}
+
+/**
+ * «Legg til»-menyer: én knapp («Legg til på CV») som åpner en meny med seksjonene
+ * («Arbeidserfaring», «Utdanning», «Språkkunnskaper» …). Hvert menyvalg blir en seksjon.
+ */
+function findMenuSections(doc: Document): Section[] {
+  const sections: Section[] = [];
+  const toggles = doc.querySelectorAll<HTMLElement>('[data-toggle="dropdown"], button[aria-haspopup="true"], button[aria-haspopup="menu"]');
+  for (const toggle of Array.from(toggles)) {
+    const t = norm(toggle.getAttribute("aria-label") || toggle.textContent || "");
+    if (!/^\+?\s*(add|legg til)\b/.test(t) || !isVisible(toggle) || inMasterCv(toggle)) continue;
+    const menu =
+      (toggle.id && Array.from(doc.querySelectorAll("[aria-labelledby]")).find((m) => m !== toggle && m.getAttribute("aria-labelledby") === toggle.id)) ||
+      toggle.parentElement?.querySelector('.dropdown-menu, [role="menu"]');
+    if (!menu) continue;
+    // Lagrede oppføringer står i panelet rundt knappen: klatre til nærmeste del med overskrift.
+    let container: Element = toggle.parentElement ?? toggle;
+    while (container.parentElement && !container.querySelector("h1, h2, h3, h4")) container = container.parentElement;
+    for (const item of Array.from(menu.querySelectorAll<HTMLElement>('a, button, [role="menuitem"]'))) {
+      const kind = kindFromText(norm(item.textContent ?? ""));
+      if (kind && !leavesPage(item) && !sections.some((s) => s.kind === kind)) sections.push({ kind, addButton: item, opener: toggle, container });
+    }
+  }
+  return sections;
 }
 
 /**
@@ -220,7 +276,7 @@ function findAddButtons(doc: Document): HTMLElement[] {
  */
 export function findSections(doc: Document): Section[] {
   const headings = Array.from(doc.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6,legend,[role=heading]"));
-  const sections: Section[] = [];
+  const sections: Section[] = findMenuSections(doc);
   for (const button of findAddButtons(doc)) {
     const preceding = headings.filter((h) => h.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING);
     let idx = preceding.length - 1;
@@ -236,7 +292,10 @@ export function findSections(doc: Document): Section[] {
     }
     const lastKind = idx >= 0 ? kindFromText(norm(preceding[idx]!.textContent ?? "")) : null;
     // «Add Work Experience» i aria-label sier det direkte. Ellers avgjør overskriften.
-    const kind = kindFromText(norm(button.getAttribute("aria-label") ?? "")) ?? lastKind;
+    // «Ny referanse» sier det i selve teksten.
+    const text = norm(button.textContent ?? "");
+    const named = /^(ny|nytt|new)\b/.test(text) ? kindFromText(addLabelRest(text) ?? "") : null;
+    const kind = kindFromText(norm(button.getAttribute("aria-label") ?? "")) ?? named ?? lastKind;
     if (!kind) continue; // f.eks. «Websites [Add]»
     while (idx > 0 && /\d+$/.test(norm(preceding[idx]!.textContent ?? "")) && kindFromText(norm(preceding[idx - 1]!.textContent ?? "")) === kind) idx--;
     const heading = idx >= 0 && lastKind === kind ? preceding[idx] : undefined;
@@ -303,18 +362,27 @@ function blockKey(el: HTMLElement, kind: SectionKind, block: HTMLElement[]): Blo
   // Plattformens egne feltnavn (f.eks. Workdays formField-jobTitle) er sikrere enn labels.
   const hinted = hintedFieldKey(el) as BlockKey | null;
   if (hinted) return hinted;
-  const text = fieldText(el, block);
-  if (!text) return null;
   const isCheckbox = el instanceof HTMLInputElement && el.type === "checkbox";
   const group = GROUP_OF[kind];
-  for (const [key, re] of FIELD_PATTERNS[group]) {
-    if (CHECKBOX_KEYS.includes(key) !== isCheckbox) continue;
-    // Type-feltet er en nedtrekksliste, ikke et tekstfelt. URL står aldri i et stort tekstfelt.
-    if (key === "urlType" && el instanceof HTMLInputElement) continue;
-    if (key === "url" && el instanceof HTMLTextAreaElement) continue;
-    if (re.test(text)) return key;
+  const match = (text: string): BlockKey | null => {
+    for (const [key, re] of FIELD_PATTERNS[group]) {
+      if (CHECKBOX_KEYS.includes(key) !== isCheckbox) continue;
+      // Type-feltet er en nedtrekksliste, ikke et tekstfelt. URL står aldri i et stort tekstfelt.
+      if (key === "urlType" && el instanceof HTMLInputElement) continue;
+      if (key === "url" && el instanceof HTMLTextAreaElement) continue;
+      if (re.test(text)) return key;
+    }
+    return null;
+  };
+  // Merkelappen først («Tittel»): id-er og hjelpetekst kan nevne andre ting («Description»).
+  if (!datePart(el)) {
+    const d = describeField(el as HTMLInputElement);
+    const own = norm([d.label, d.ariaLabel].filter(Boolean).join(" "));
+    const byLabel = own ? match(own) : null;
+    if (byLabel) return byLabel;
   }
-  return null;
+  const text = fieldText(el, block);
+  return text ? match(text) : null;
 }
 
 /** En lenke fra personalia (LinkedIn, GitHub, nettside) som skal inn i «Websites». */
@@ -370,8 +438,17 @@ function entryValue(key: BlockKey, entry: Entry, kind: SectionKind): string | bo
     case "location": return s("location");
     case "current": return kind === "educations" ? stillStudying(e) : Boolean(e.is_current);
     case "start": return kind === "certifications" ? s("issued_date") : s("start_date");
-    case "end": return e.is_current || (kind === "educations" && stillStudying(e)) ? null : s("end_date");
+    // Kurs har bare én dato: «Til» blir samme dag som «Fra».
+    case "end":
+      if (kind === "certifications") return s("issued_date");
+      return e.is_current || (kind === "educations" && stillStudying(e)) ? null : s("end_date");
     case "credits": return creditsFor(e);
+    case "comment": return s("description");
+    case "eduTitle": {
+      const degree = s("degree");
+      const field = s("field_of_study");
+      return degree && field ? `${degree} i ${field}` : degree ?? field ?? null;
+    }
     // Ikke oppgitt i profilen: de fleste stillinger er heltid.
     case "percentage": return kind === "experiences" ? String(typeof e.employment_percentage === "number" ? e.employment_percentage : 100) : null;
     case "refName": return s("name");
@@ -379,7 +456,8 @@ function entryValue(key: BlockKey, entry: Entry, kind: SectionKind): string | bo
     case "refRole": return s("role");
     case "email": return s("email");
     case "phone": return s("phone");
-    case "relation": return s("relation");
+    // «Vår relasjon» er ofte påkrevd. Uten egen tekst i profilen: rolle og firma («Rektor, Bærum kommune»).
+    case "relation": return s("relation") ?? ([s("role"), s("company")].filter(Boolean).join(", ") || null);
     case "certName": return s("name");
     case "issuer": return s("issuer");
     case "school": return s("school");
@@ -455,12 +533,12 @@ function editorRoot(block: HTMLElement[]): Element | null {
 }
 
 /** «Lagre»-knappen i en redigeringsboks. Aldri «Send»/«Neste»/«Søk»: de sender inn eller går videre. */
-function saveButtonIn(root: Element): HTMLElement | null {
-  const buttons = Array.from(root.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"]'));
+export function saveButtonIn(root: Element): HTMLElement | null {
+  const buttons = Array.from(root.querySelectorAll<HTMLElement>('button, [role="button"], a, input[type="submit"], input[type="button"]'));
   return (
     buttons.find((b) => {
       const t = norm(b.getAttribute("aria-label") || b.textContent || (b as HTMLInputElement).value || "");
-      return SAVE_LABEL.test(t) && !FORBIDDEN_LABEL.test(t) && isVisible(b) && !(b as HTMLButtonElement).disabled;
+      return SAVE_LABEL.test(t) && !FORBIDDEN_LABEL.test(t) && isVisible(b) && !(b as HTMLButtonElement).disabled && !leavesPage(b);
     }) ?? null
   );
 }
@@ -505,27 +583,77 @@ async function saveBlockIfNeeded(block: HTMLElement[]): Promise<string | null> {
   return newErrors.length ? `«Lagre» ga feil: «${newErrors[0]!.slice(0, 80)}»` : "blokken ble ikke lagret";
 }
 
+/**
+ * Lukk en redigeringsboks som ikke ble lagret («Avbryt»). Mens den er åpen, sperrer mange sider
+ * resten av skjemaet (Webcruiter gråer ut vedlegg og referanser).
+ */
+async function cancelEditor(block: HTMLElement[]): Promise<void> {
+  const root = editorRoot(block);
+  if (!root) return;
+  const cancel = Array.from(root.querySelectorAll<HTMLElement>('button, [role="button"], a')).find(
+    (b) => /^(avbryt|cancel|lukk|close)$/.test(norm(b.getAttribute("aria-label") || b.textContent || "")) && isVisible(b) && !leavesPage(b),
+  );
+  if (!cancel) return;
+  log(`lukker boksen som ikke ble lagret (${describeEl(cancel)})`);
+  realClick(cancel);
+  await waitFor(() => block.every((el) => !el.isConnected || !isVisible(el)), 3000);
+}
+
 /** Radioknapp-grupper i blokken (f.eks. språknivå «Skriftlig»/«Muntlig»): velg alternativet som passer. */
 function fillBlockRadios(block: HTMLElement[], entry: Entry, kind: SectionKind): number {
   const root = editorRoot(block) ?? commonAncestor(block);
   if (!root) return 0;
   let filled = 0;
   for (const group of scanChoiceGroups(root, { deep: true })) {
-    if (group.options.some((o) => o.el.checked)) continue;
-    const question = norm(group.question);
-    const key = FIELD_PATTERNS[GROUP_OF[kind]].find(([k, re]) => !CHECKBOX_KEYS.includes(k) && re.test(question))?.[0];
+    // Spørsmålet kan stå over en hjelpetekst («Nåværende stilling? ⓘ Hvis "Ja" må …»): ta med teksten rundt gruppen.
+    const question = norm(`${group.question} ${groupSurroundings(group.options.map((o) => o.el))}`);
+    // «Nåværende stilling? Ja/Nei» (Webcruiter): «Nei» er ofte valgt fra start, så sjekk før vi hopper over.
+    const currentRe = FIELD_PATTERNS[GROUP_OF[kind]].find(([k]) => k === "current")?.[1];
+    const yes = group.options.find((o) => /^(ja|yes)\b/.test(norm(o.text)));
+    const no = group.options.find((o) => /^(nei|no)\b/.test(norm(o.text)));
+    log(`  radiogruppe «${question.slice(0, 60)}» (${group.options.map((o) => norm(o.text)).join(" / ").slice(0, 60)})`);
+    if (currentRe?.test(question) && yes && no) {
+      const want = entryValue("current", entry, kind) === true ? yes : no;
+      if (!want.el.checked) checkOption(want.el);
+      highlight(want.el.labels?.[0] ?? want.el, "filled", `Masterkey: ${SECTION_LABELS[kind]}`);
+      filled++;
+      continue;
+    }
+    // Et forhåndsvalgt «Ingen»/«Velg» er ikke et svar (Webcruiters språknivå starter på «Ingen»).
+    if (group.options.some((o) => o.el.checked && !/^(ingen|none|velg|select|choose)\b/.test(norm(o.text).replace(/^(muntlig|skriftlig|spoken|written)\s+/, "")))) continue;
+    // Språknivå: «Muntlig»/«Skriftlig» står ofte i hvert alternativ («Muntlig Godt»).
+    const optionWords = norm(group.options.map((o) => o.text).join(" "));
+    const key =
+      kind === "languages" && /muntlig|spoken|speak|oral/.test(`${question} ${optionWords}`) && !/skriftlig|written|writ/.test(optionWords)
+        ? "spoken"
+        : kind === "languages" && /skriftlig|written|writ/.test(`${question} ${optionWords}`)
+          ? "written"
+          : FIELD_PATTERNS[GROUP_OF[kind]].find(([k, re]) => !CHECKBOX_KEYS.includes(k) && re.test(question))?.[0];
     if (!key) continue;
     const value = entryValue(key, entry, kind);
     if (typeof value !== "string") continue;
     const texts = group.options.map((o) => o.text);
     const i = ["overall", "spoken", "written"].includes(key) ? languageLevelOptionIndex(texts, value as LanguageLevel) : bestOptionIndex(texts.map((text) => ({ text })), value, 2);
     const option = group.options[i];
+    log(`    ${key} = «${value}» → ${option ? `«${norm(option.text)}»` : "✗ fant ikke alternativet"}`);
     if (!option) continue;
     checkOption(option.el);
     highlight(option.el.labels?.[0] ?? option.el, "filled", `Masterkey: ${SECTION_LABELS[kind]}`);
     filled++;
   }
   return filled;
+}
+
+/** Korte tekster rett før radiogruppen (merkelapp og hjelpetekst), uten selve alternativene. */
+function groupSurroundings(inputs: HTMLInputElement[]): string {
+  const container = commonAncestor(inputs);
+  if (!container) return "";
+  const before: string[] = [];
+  for (let el = container.previousElementSibling; el && before.length < 3; el = el.previousElementSibling) {
+    const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (t && t.length < 200 && !el.querySelector("input, select, textarea")) before.unshift(t);
+  }
+  return before.join(" ");
 }
 
 /** Fagfelt, skole og beskrivelse: avgjør f.eks. «Master of Science» vs. «Master of Arts». */
@@ -601,12 +729,18 @@ async function fillBlock(block: HTMLElement[], entry: Entry, kind: SectionKind):
   const usedKeys = new Set<string>();
   // Uten «studerer fortsatt»-boks spør feltet etter forventet slutt (Workday «To (Actual or Expected)»).
   const hasCurrentToggle = assigned.some((a) => a.key === "current");
+  // Med eget kommentarfelt er «Beskrivelse» en kort tittel («Fødselspermisjon»): verv blir «Rolle, Organisasjon».
+  const hasComment = assigned.some((a) => a.key === "comment");
   for (const { el, key, part } of assigned) {
     if (!key || !el.isConnected) continue;
     const slot = `${key}:${part ?? ""}`;
     if (usedKeys.has(slot)) continue;
     let value = entryValue(key, entry, kind);
     if (key === "end" && value === null && kind === "educations" && !hasCurrentToggle) value = expectedEnd(entry);
+    if (key === "description" && hasComment && kind === "volunteering") {
+      const v = entry as Volunteering;
+      value = [v.role, v.organization].filter(Boolean).join(", ") || null;
+    }
     if (value === null || value === false) continue;
     try {
       const ok = await setControl(el, value, key, part, entryContext(entry), aiSearchTerms(entry));
@@ -723,14 +857,23 @@ async function addBlock(
     await sleep(attempt === 0 ? 400 : 1200);
     // Siden tegnes ofte på nytt etter hvert klikk, så knappen må finnes på nytt hver gang.
     // Etter «Lagre» kan det ta litt tid før «Legg til» er tilbake.
-    const button = await waitFor(
-      () => addButtonAfter(doc, previousBlock) ?? findSections(doc).find((s) => s.kind === kind)?.addButton ?? null,
-      5000,
-    );
-    if (!button) return { block: null, reason };
+    const found = await waitFor(() => {
+      const section = findSections(doc).find((s) => s.kind === kind);
+      // Menyvalg («Legg til på CV» → «Arbeidserfaring») finnes bare via menyen.
+      if (section?.opener && section.addButton) return { button: section.addButton, opener: section.opener };
+      const button = addButtonAfter(doc, previousBlock) ?? section?.addButton ?? null;
+      return button ? { button, opener: undefined } : null;
+    }, 5000);
+    if (!found) return { block: null, reason };
+    const { button, opener } = found;
     const before = new Set(controlsIn(doc));
     const errorsBefore = new Set(visibleErrors(doc));
     button.scrollIntoView?.({ block: "center" });
+    if (opener) {
+      log(`${SECTION_LABELS[kind]}: åpner menyen «${norm(opener.textContent ?? "")}»`);
+      realClick(opener);
+      await sleep(300);
+    }
     log(`${SECTION_LABELS[kind]}: klikker ${describeEl(button)} «${norm(button.textContent ?? "")}»`);
     realClick(button);
     const appeared = await waitFor(() => {
@@ -760,13 +903,24 @@ async function addBlock(
   return { block: null, reason };
 }
 
-/** All tekst mellom to elementer i dokumentet (seksjonens innhold). */
-function textBetween(start: Element, end: Element | null): string {
-  const range = start.ownerDocument.createRange();
-  range.setStartAfter(start);
-  if (end) range.setEndBefore(end);
-  else range.setEndAfter(start.ownerDocument.body.lastChild ?? start);
-  return range.toString();
+/**
+ * Synlig tekst mellom to elementer i dokumentet (seksjonens innhold), eller i et element.
+ * Skjult tekst (Webcruiters varsel om referanser i andre søknader) og valg i nedtrekkslister
+ * («MasterCV-referanse») er ikke oppføringer som er lagt til her.
+ */
+export function visibleText(doc: Document, within: { start: Element; end: Element | null } | Element): string {
+  const root = within instanceof Element ? within : doc.body;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const parts: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    if (!parent || parent.closest("select, option, datalist, script, style, template")) continue;
+    if (!(within instanceof Element)) {
+      if (!isAfter(node, within.start) || (within.end && !isAfter(within.end, node))) continue;
+    }
+    if (isVisible(parent)) parts.push(node.textContent ?? "");
+  }
+  return parts.join(" ");
 }
 
 /** Står oppføringen allerede i seksjonen? Sjekker det som identifiserer den (språk, arbeidsgiver …). */
@@ -803,7 +957,8 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
     const report: FieldReport = { key: kind, label: SECTION_LABELS[kind], confidence: 1, status: "no-value" };
     fields.push(report);
 
-    const existing = sectionControls(doc, initial);
+    // Menyseksjoner deler panel med andre («Jeg har ingen arbeidserfaring»): ingen blokk før klikket.
+    const existing = initial.opener ? [] : sectionControls(doc, initial);
     existing.forEach((el) => handled.add(el));
     if (entries.length === 0) continue;
     if (!payload.overwrite && existing.some((el) => !isEmptyControl(el))) {
@@ -812,7 +967,7 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
     }
 
     // Oppføringer som allerede er lagt inn (står som tekst i seksjonen), legges ikke inn på nytt.
-    const sectionText = norm(initial.heading ? textBetween(initial.heading, initial.nextHeading ?? null) : initial.container.textContent ?? "");
+    const sectionText = norm(visibleText(doc, initial.heading ? { start: initial.heading, end: initial.nextHeading ?? null } : initial.container));
     const already = entries.filter((e) => entryAlreadyPresent(sectionText, e, kind));
     if (already.length) {
       log(`${SECTION_LABELS[kind]}: ${already.length} finnes fra før, hopper over dem`);
@@ -850,7 +1005,10 @@ export async function fillRepeatingSections(payload: FillPayload, doc: Document)
       done++;
       // Redigeringsboks med egen «Lagre»: lagre før neste «Legg til» (ellers går det ikke).
       const saveError = await saveBlockIfNeeded(block);
-      if (saveError) stopReason = saveError;
+      if (saveError) {
+        stopReason = saveError;
+        await cancelEditor(block);
+      }
     }
 
     report.label = `${SECTION_LABELS[kind]} (${done} av ${entries.length}${stopReason ? `: ${stopReason}` : ""})`;

@@ -34,7 +34,8 @@ function isCandidate(el: FillableElement): boolean {
 
 export function isVisible(el: Element): boolean {
   // jsdom har ingen layout; der regner vi alt som synlig.
-  if (typeof navigator !== "undefined" && navigator.userAgent.includes("jsdom")) return true;
+  // (Unntak: elementer som er skjult med inline style eller hidden-attributtet.)
+  if (typeof navigator !== "undefined" && navigator.userAgent.includes("jsdom")) return !el.closest('[hidden], [style*="display:none"], [style*="display: none"]');
   const style = getComputedStyle(el);
   if (style.visibility === "hidden" || style.display === "none") return false;
   return el.getClientRects().length > 0;
@@ -54,8 +55,14 @@ function textOfIds(ids: string | null, doc: Document | ShadowRoot): string {
 }
 
 function labelText(el: FillableElement): string {
-  const labels = (el as HTMLInputElement).labels;
-  if (labels && labels.length) return clip(Array.from(labels).map((l) => labelWithoutControls(l)).join(" "));
+  const all = Array.from((el as HTMLInputElement).labels ?? []);
+  // Samme id flere steder (Webcruiter har alle redigeringsbokser skjult på siden): da peker også
+  // merkelappene fra de andre boksene hit. Bruk de synlige, helst i samme skjema.
+  const visible = all.filter((l) => isVisible(l));
+  const form = el.closest("form");
+  const sameForm = visible.filter((l) => !form || l.closest("form") === form);
+  const labels = sameForm.length ? sameForm : visible.length ? visible : all;
+  if (labels.length) return clip(labels.map((l) => labelWithoutControls(l)).join(" "));
   const wrapping = el.closest("label");
   if (wrapping) return clip(labelWithoutControls(wrapping));
   return "";
@@ -266,6 +273,10 @@ export function setTextValue(el: HTMLInputElement | HTMLTextAreaElement, value: 
   // composed: ekte input-hendelser krysser shadow DOM. Ligger feltet inni en web-komponent
   // (f.eks. Jobbnorges jn-input), lytter appen på komponenten, ikke på selve feltet.
   el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: value }));
+  // Noen felt oppdaterer modellen først ved tastetrykk (Kendo/Knockout «valueUpdate: keyup»).
+  if (el.matches('[data-value-update*="key"], [data-bind*="valueUpdate"], [data-bind*="keyup"]')) {
+    el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Unidentified" }));
+  }
   el.dispatchEvent(new Event("change", { bubbles: true }));
   simulateBlur(el);
 }
@@ -448,6 +459,9 @@ export function scanChoiceGroups(doc: Document | Element, opts: { deep?: boolean
 /** Krysser av som en bruker ville gjort, så rammeverkene får med seg endringen. */
 export function checkOption(el: HTMLInputElement) {
   simulateFocus(el);
+  // Skjult radioknapp inni en knapp-lignende label (Bootstrap «btn-group»): klikk labelen, som en bruker.
+  const label = !isVisible(el) ? el.labels?.[0] : undefined;
+  if (!el.checked) (label ?? el).click();
   if (!el.checked) el.click();
   simulateBlur(el);
 }

@@ -56,17 +56,18 @@ const ORDER: LanguageLevel[] = ["basic", "conversational", "fluent", "native"];
 /** Ord som betyr akkurat dette nivået. Vinner over synonymene i LEVEL_WORDS («Fluent» foran «Advanced»). */
 const EXACT_WORDS: Record<LanguageLevel, RegExp> = {
   native: /native|morsmål|mother tongue/,
-  fluent: /fluent|flytende|full professional/,
+  fluent: /fluent|flytende|full professional|meget godt|svært godt|very good|excellent/,
   conversational: /conversational|professional working|\bgood\b|\bgodt?\b|\bgode\b/,
-  basic: /basic|grunnleggende|elementary/,
+  basic: /basic|grunnleggende|elementary|\bnoe\b/,
 };
 
 /** Nøkkelord per nivå, sterkest først. Dekker vanlige engelske og norske skalaer. */
 const LEVEL_WORDS: Record<LanguageLevel, RegExp> = {
   native: /native|mother tongue|morsmål|bilingual|tospråklig/,
-  fluent: /fluent|flytende|full professional|proficient|advanced|avansert|expert|c1|c2/,
+  // «Meget godt» (Webcruiter) før «godt» under conversational.
+  fluent: /fluent|flytende|full professional|proficient|advanced|avansert|expert|c1|c2|meget godt|svært godt|very good|excellent|utmerket/,
   conversational: /intermediate|conversational|working|professional|good|godt?\b|gode|middels|b1|b2/,
-  basic: /basic|beginner|elementary|limited|grunnleggende|nybegynner|a1|a2/,
+  basic: /basic|beginner|elementary|limited|grunnleggende|nybegynner|a1|a2|\bnoe\b|\bsome\b|litt/,
 };
 
 /** Høyeste av muntlig og skriftlig nivå («Overall»). */
