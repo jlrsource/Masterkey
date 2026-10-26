@@ -1,4 +1,5 @@
 import { ANSWER_TAG_FIELDS, type FieldKey } from "./fields";
+import { prefAnswer } from "./applicationAnswers";
 import { pickDocument } from "./documentLanguage";
 import type { Education, Experience, FullProfile, ProfileDocument } from "./schema";
 
@@ -10,8 +11,9 @@ const text = (v: string | null | undefined): ResolvedValue | null =>
 const byRecent = <T extends { start_date?: string | null; sort_order?: number }>(a: T, b: T) =>
   (b.start_date ?? "").localeCompare(a.start_date ?? "") || (a.sort_order ?? 0) - (b.sort_order ?? 0);
 
+/** Jobben brukeren har nå. Ingen nåværende jobb i profilen gir ingen (ikke den siste jobben). */
 export function currentExperience(p: FullProfile): Experience | undefined {
-  return p.experiences.find((e) => e.is_current) ?? [...p.experiences].sort(byRecent)[0];
+  return p.experiences.find((e) => e.is_current);
 }
 
 export function latestEducation(p: FullProfile): Education | undefined {
@@ -22,6 +24,9 @@ export function latestEducation(p: FullProfile): Education | undefined {
 /** Finn verdien fra profilen som hører til en felttype. */
 export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | null {
   const pe = p.personal;
+  // Faste søknadssvar (Ja/Nei, arbeidsform …). Oppstart: fast svar først, så standardsvar med tag.
+  const pref = prefAnswer(key, p);
+  if (pref) return text(pref.value);
   const tag = ANSWER_TAG_FIELDS[key];
   if (tag) {
     const answer = p.saved_answers.find((a) => a.tags.includes(tag));

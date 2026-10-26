@@ -5,6 +5,35 @@ import { z } from "zod";
 const optionalText = z.string().trim().nullish();
 const optionalDate = z.string().nullish(); // ISO yyyy-mm-dd
 
+export const YES_NO = ["yes", "no"] as const;
+export const WORK_REGIONS = ["norway", "eu_eea", "uk", "us"] as const;
+export const WORK_MODES = ["onsite", "hybrid", "remote"] as const;
+export const EMPLOYMENT_TYPES = ["fulltime", "parttime"] as const;
+export const PRONOUNS = ["he", "she", "they"] as const;
+export const GENDERS = ["man", "woman", "nonbinary", "undisclosed"] as const;
+
+/**
+ * Faste svar på spørsmål som går igjen i søknadsskjemaer («Do you require sponsorship?»).
+ * Alt er valgfritt: står et svar tomt, lar extensionen spørsmålet være.
+ */
+export const applicationPrefsSchema = z.object({
+  /** Land/områder brukeren har lov til å jobbe i. */
+  work_auth: z.array(z.enum(WORK_REGIONS)).nullish(),
+  needs_sponsorship: z.enum(YES_NO).nullish(),
+  relocate: z.enum(YES_NO).nullish(),
+  work_mode: z.enum(WORK_MODES).nullish(),
+  employment_type: z.enum(EMPLOYMENT_TYPES).nullish(),
+  notice_period: optionalText,
+  earliest_start: optionalText,
+  drivers_license: z.enum(YES_NO).nullish(),
+  /** Konkurranse-, kunde- eller taushetsklausul som kan begrense brukeren i en ny jobb. */
+  restrictive_agreement: z.enum(YES_NO).nullish(),
+  heard_about: optionalText,
+  pronouns: z.enum(PRONOUNS).nullish(),
+  gender: z.enum(GENDERS).nullish(),
+});
+export type ApplicationPrefs = z.infer<typeof applicationPrefsSchema>;
+
 export const personalSchema = z.object({
   first_name: optionalText,
   last_name: optionalText,
@@ -20,6 +49,7 @@ export const personalSchema = z.object({
   github_url: optionalText,
   headline: optionalText,
   summary: optionalText,
+  application_prefs: applicationPrefsSchema.nullish(),
 });
 export type Personal = z.infer<typeof personalSchema>;
 

@@ -1,6 +1,6 @@
 import { browser } from "wxt/browser";
 import { brandMarkSvg } from "@soknadsprofil/shared";
-import { CheckCircle2, ExternalLink, Eraser, Loader2, LogOut, RefreshCw, TriangleAlert, Wand2 } from "lucide-react";
+import { BookmarkPlus, CheckCircle2, ExternalLink, Eraser, Loader2, LogOut, RefreshCw, TriangleAlert, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { sendToBackground, type ExtState } from "@/lib/messages";
 import type { FieldReport, FillSummary } from "@/lib/types";
@@ -31,6 +31,18 @@ export function App() {
   const [result, setResult] = useState<FillSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overwrite, setOverwrite] = useState(false);
+  const [remember, setRemember] = useState<{ busy: boolean; message: string | null }>({ busy: false, message: null });
+
+  async function rememberAnswers() {
+    setRemember({ busy: true, message: null });
+    const res = await sendToBackground({ type: "SAVE_ANSWERS" });
+    const message = !res.ok
+      ? res.error
+      : res.added + res.updated === 0
+        ? "Fant ingen nye svar du har fylt inn selv."
+        : `Husket ${res.added + res.updated} svar. De fylles ut neste gang du får samme spørsmål.`;
+    setRemember({ busy: false, message });
+  }
 
   const load = useCallback(async () => setState(await sendToBackground({ type: "GET_STATE" })), []);
 
@@ -183,10 +195,29 @@ export function App() {
         </div>
       )}
 
+      <div className="mt-3 rounded-xl border bg-card p-3">
+        <div className="text-xs font-medium">Svarte du på noe selv?</div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">Lagre svarene, så fyller Masterkey dem ut neste gang samme spørsmål dukker opp.</p>
+        <button
+          onClick={rememberAnswers}
+          disabled={remember.busy}
+          className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-lg border text-xs font-medium hover:bg-muted disabled:opacity-60"
+        >
+          {remember.busy ? <Loader2 className="size-3.5 animate-spin" /> : <BookmarkPlus className="size-3.5" />}
+          Husk svarene mine
+        </button>
+        {remember.message && <p className="mt-2 text-[11px] text-muted-foreground" role="status">{remember.message}</p>}
+      </div>
+
       <p className="mt-4 text-center text-[11px] text-muted-foreground">Ingenting sendes inn automatisk. Se over før du trykker «Send».</p>
+      <p className="mt-1 text-center text-[10px] text-muted-foreground/60">
+        Versjon {new Date(__BUILD_TIME__).toLocaleString("nb-NO", { dateStyle: "short", timeStyle: "short" })}
+      </p>
     </div>
   );
 }
+
+declare const __BUILD_TIME__: string;
 
 function NotFilled({ title, items, hint }: { title: string; items: string[]; hint?: string }) {
   if (items.length === 0) return null;

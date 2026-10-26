@@ -44,9 +44,16 @@ export function normalize(text: string | undefined | null): string {
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wordRegex = (kw: string) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegex(normalize(kw))}(?:$|[^\\p{L}\\p{N}])`, "u");
 
+/**
+ * Korte norske ord som også er vanlige engelske ord («employed by KPMG»). De teller bare i korte
+ * merkelapper («Postnr. og by», «Hvilken by bor du i?»), ikke i lange spørsmål.
+ */
+const SHORT_LABEL_ONLY = new Set(["by", "sted"]);
+const MAX_WORDS_FOR_SHORT = 6;
+
 const compiled = FIELD_KEYS.map((key) => ({
   key,
-  positives: KEYWORDS[key].map((kw) => ({ re: wordRegex(kw), specificity: Math.min(1, normalize(kw).length / 10) })),
+  positives: KEYWORDS[key].map((kw) => ({ re: wordRegex(kw), specificity: Math.min(1, normalize(kw).length / 10), shortOnly: SHORT_LABEL_ONLY.has(kw) })),
   negatives: (NEGATIVE_KEYWORDS[key] ?? []).map(wordRegex),
 }));
 
@@ -91,7 +98,9 @@ export function classifyField(d: FieldDescriptor): Classification | null {
       const text = texts[source];
       if (!text) continue;
       let sourceBest = 0;
+      const words = text.split(" ").length;
       for (const p of positives) {
+        if (p.shortOnly && words > MAX_WORDS_FOR_SHORT) continue;
         if (p.re.test(text)) sourceBest = Math.max(sourceBest, SOURCE_WEIGHTS[source] * (0.75 + 0.25 * p.specificity));
       }
       if (sourceBest > 0) {

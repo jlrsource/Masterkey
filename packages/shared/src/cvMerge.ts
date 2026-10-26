@@ -36,7 +36,10 @@ export interface CvProposal {
   lists: { [S in ImportSection]: RowSuggestion<S>[] };
 }
 
-export const PERSONAL_LABELS: Record<keyof Personal, string> = {
+/** Personalia fra CV-en (de faste søknadssvarene står ikke i en CV). */
+type CvPersonalKey = Exclude<keyof Personal, "application_prefs">;
+
+export const PERSONAL_LABELS: Record<CvPersonalKey, string> = {
   first_name: "Fornavn",
   last_name: "Etternavn",
   email: "E-post",
@@ -161,7 +164,7 @@ function suggestRows<S extends ImportSection>(section: S, rows: ImportRows[S][],
 export function buildCvProposal(extraction: CvExtraction, profile: FullProfile): CvProposal {
   const current = profile.personal ?? {};
   const personal: PersonalSuggestion[] = [];
-  for (const k of Object.keys(PERSONAL_LABELS) as (keyof Personal)[]) {
+  for (const k of Object.keys(PERSONAL_LABELS) as CvPersonalKey[]) {
     const raw = extraction.personal[k as keyof CvExtraction["personal"]];
     const proposed = k === "birth_date" ? cleanDate(raw) : RAW_PERSONAL_FIELDS.has(k) ? cleanRaw(raw) : cleanText(raw);
     if (!proposed) continue;

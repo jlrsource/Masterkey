@@ -1413,3 +1413,174 @@ describe("Webcruiter: «Legg til på CV»-meny, «Ny referanse», vedlegg, og Ma
     expect(labels).toEqual(expect.arrayContaining(["Arbeidserfaring (2 av 2)", "Utdanning (1 av 1)", "Referanser (1 av 1)"]));
   }, 60000);
 });
+
+describe("Lever: sted, nåværende arbeidsgiver og «employed by» (fra test 26. okt)", () => {
+  it("velger ikke et sted uten byen, fyller ikke «Current company» uten nåværende jobb, og lar KPMG-spørsmålet være", async () => {
+    // Som Lever: stedsfeltet foreslår steder ut fra hvor brukeren er (Blommenholm), uansett hva man skriver.
+    document.body.innerHTML = `
+      <div class="application-question"><div class="application-label">Current city <span>*</span></div>
+        <div class="application-field"><input id="location-input" name="location" type="text" autocomplete="off">
+          <div class="dropdown-results"></div></div></div>
+      <div class="application-question"><div class="application-label">Current company</div>
+        <div class="application-field"><input name="org" type="text"></div></div>
+      <div class="application-question"><div class="application-label">If you have been employed by KPMG, please share your functional area(s) and approximate dates of employment.</div>
+        <div class="application-field"><input name="cards[x][field0]" type="text"></div></div>`;
+    const input = document.getElementById("location-input") as HTMLInputElement;
+    const results = document.querySelector(".dropdown-results")!;
+    input.addEventListener("input", () => {
+      results.innerHTML = input.value ? `<div role="option" class="dropdown-location" id="location-0">Blommenholm, NOR</div>` : "";
+    });
+    results.addEventListener("click", (e) => {
+      input.value = (e.target as HTMLElement).textContent!;
+      results.innerHTML = "";
+    });
+    // Forlates feltet med listen åpen, velger Lever det øverste forslaget.
+    input.addEventListener("keydown", (e) => e.key === "Escape" && (results.innerHTML = ""));
+    input.addEventListener("blur", () => {
+      const first = results.querySelector<HTMLElement>("[role=option]");
+      if (first) first.click();
+    });
+    const p: FullProfile = {
+      ...profile,
+      personal: { ...profile.personal, city: "Trondheim" },
+      experiences: [{ employer: "Bærum kommune", title: "Assistent", start_date: "2024-08-01", end_date: "2025-06-01", is_current: false, sort_order: 0 }],
+    };
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(input.value).not.toContain("Blommenholm");
+    expect((document.querySelector('[name="org"]') as HTMLInputElement).value).toBe("");
+    expect((document.querySelector('[name="cards[x][field0]"]') as HTMLInputElement).value).toBe("");
+  }, 30000);
+});
+
+describe("Lever leser CV-en og fyller ut felt selv etter opplasting (fra test 26. okt)", () => {
+  it("laster opp CV-en først, venter på siden, og lar profilen vinne over det siden gjettet", async () => {
+    document.body.innerHTML = `
+      <label for="resume">Resume/CV</label><input type="file" id="resume" name="resume">
+      <label for="city">Current city</label><input id="city" name="location">
+      <label for="org">Current company</label><input id="org" name="org">`;
+    class FakeDataTransfer {
+      files: File[] = [];
+      items = { add: (f: File) => this.files.push(f) };
+    }
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    const resume = document.getElementById("resume") as HTMLInputElement;
+    let set: File[] = [];
+    Object.defineProperty(resume, "files", { get: () => set, set: (v: File[]) => (set = v) });
+    // Som Lever: et lite øyeblikk etter opplastingen fylles sted og arbeidsgiver fra CV-en.
+    resume.addEventListener("change", () =>
+      setTimeout(() => {
+        (document.getElementById("city") as HTMLInputElement).value = "Blommenholm, NOR";
+        (document.getElementById("org") as HTMLInputElement).value = "Folkebadet Sandvika";
+      }, 600),
+    );
+    const p: FullProfile = {
+      ...profile,
+      personal: { ...profile.personal, city: "Trondheim" },
+      experiences: [{ employer: "Folkebadet Sandvika", title: "Servitør", start_date: "2024-05-01", end_date: "2025-08-01", is_current: false, sort_order: 0 }],
+      documents: [{ type: "cv", file_name: "CV.pdf", storage_path: "u/cv", is_default: true }],
+    };
+    await fillDocument({ profile: p, files: { cvFile: { name: "CV.pdf", mime: "application/pdf", base64: btoa("pdf") } }, overwrite: false }, document);
+    expect(set.map((f) => f.name)).toEqual(["CV.pdf"]);
+    expect((document.getElementById("city") as HTMLInputElement).value).toBe("Trondheim");
+    expect((document.getElementById("org") as HTMLInputElement).value).toBe("");
+  }, 30000);
+});
+
+describe("Søknadssvar og husket svar (Lever-lignende spørsmål)", () => {
+  const radios = (name: string, q: string, options: string[]) => `
+    <div class="application-question"><div class="application-label">${q}</div>
+      <ul>${options.map((o, i) => `<li><label><input type="radio" name="${name}" value="${i}"> ${o}</label></li>`).join("")}</ul></div>`;
+  function leverPage() {
+    document.body.innerHTML = `
+      ${radios("auth", "Are you legally authorized to work in Norway?", ["Yes", "No"])}
+      ${radios("visa", "Will you now or in the future require sponsorship for employment visa status?", ["Yes", "No"])}
+      ${radios("mode", "What is your preferred work arrangement?", ["On-site", "Hybrid", "Remote"])}
+      <div class="application-question"><label for="hear">How did you hear about this job?</label>
+        <select id="hear"><option value="">Select…</option><option>Company website</option><option>LinkedIn</option><option>Other</option></select></div>
+      ${radios("prev", "Have you previously worked for Spotify?", ["Yes", "No"])}
+      <div class="application-question"><label for="lang">What is your favourite programming language?</label><input id="lang"></div>
+      <div class="application-question"><div class="application-label">Which teams interest you?</div>
+        <ul>${["Backend", "Frontend", "Data"].map((o) => `<li><label><input type="checkbox" name="team-${o}"> ${o}</label></li>`).join("")}</ul></div>
+      <div class="application-question"><label><input type="checkbox" id="consent" name="consent"> I agree to the privacy policy</label></div>
+      ${radios("terms", "I confirm that the information I have provided is accurate", ["Yes", "No"])}
+      <div class="application-question"><label for="unknown">What would you bring to the team?</label><input id="unknown"></div>`;
+  }
+  const p: FullProfile = {
+    ...profile,
+    personal: { ...profile.personal, application_prefs: { work_auth: ["norway"], needs_sponsorship: "no", work_mode: "hybrid", heard_about: "LinkedIn" } },
+    saved_answers: [
+      { question: "Have you previously worked for Spotify?", answer: "No", tags: ["husket"] },
+      { question: "What is your favourite programming language?", answer: "TypeScript", tags: ["husket"] },
+      { question: "Which teams interest you?", answer: "Backend, Data", tags: ["husket"] },
+    ],
+  };
+  const checked = (name: string) => (document.querySelector(`input[name="${name}"]:checked`)?.parentElement?.textContent ?? "").trim();
+
+  it("krysser av faste svar og husket svar, men aldri samtykker", async () => {
+    leverPage();
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    expect(checked("auth")).toBe("Yes");
+    expect(checked("visa")).toBe("No");
+    expect(checked("mode")).toBe("Hybrid");
+    expect((document.getElementById("hear") as HTMLSelectElement).selectedOptions[0]!.text).toBe("LinkedIn");
+    expect(checked("prev")).toBe("No");
+    expect((document.getElementById("lang") as HTMLInputElement).value).toBe("TypeScript");
+    expect(["Backend", "Frontend", "Data"].filter((t) => (document.querySelector(`input[name="team-${t}"]`) as HTMLInputElement).checked)).toEqual(["Backend", "Data"]);
+    expect((document.getElementById("consent") as HTMLInputElement).checked).toBe(false);
+    expect(checked("terms")).toBe("");
+  }, 30000);
+
+  it("«Husk svarene mine» lagrer bare det brukeren fylte inn selv, aldri samtykker eller personalia", async () => {
+    leverPage();
+    document.body.insertAdjacentHTML("afterbegin", `<label for="fn">First name</label><input id="fn" value="Kari">`);
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    // Brukeren svarer selv på det extensionen ikke kunne, og krysser av for samtykket.
+    (document.getElementById("unknown") as HTMLInputElement).value = "Erfaring med design og kode";
+    (document.getElementById("consent") as HTMLInputElement).checked = true;
+    (document.querySelector('input[name="terms"][value="0"]') as HTMLInputElement).checked = true;
+    const answers = createEngine(document).collectAnswers();
+    expect(answers).toEqual([{ question: "What would you bring to the team?", answer: "Erfaring med design og kode" }]);
+  }, 30000);
+});
+
+describe("Lever-spørsmål som besvares fra profilen (fra test 27. okt)", () => {
+  it("pronomen, språk, arbeidstillatelse, hybrid og tidligere ansatt", async () => {
+    const radios = (name: string, q: string, options: string[]) => `
+      <li class="application-question custom-question"><div class="application-label"><div class="text">${q}<span class="required">✱</span></div></div>
+        <ul data-qa="multiple-choice">${options.map((o) => `<li><label><input type="radio" name="${name}" value="${o}"><span class="application-answer-alternative">${o}</span></label></li>`).join("")}</ul></li>`;
+    document.body.innerHTML = `<ul>
+      <li class="application-question"><div class="application-label">Pronouns</div>
+        <ul id="candidatePronounsCheckboxes">${["He/him", "She/her", "They/them", "Xe/xem"].map((o) => `<li><label><input type="checkbox" name="pronouns" value="${o}"><span class="application-answer-alternative">${o}</span></label></li>`).join("")}
+          <li><label><input type="checkbox" name="pronouns" value="Use name only"><span class="application-answer-alternative">Use name only</span></label></li>
+          <p class="description">Let the employer know what pronouns you use so that they can address you correctly.</p></ul></li>
+      ${radios("en", "Do you have full work proficiency in English?", ["Yes", "No"])}
+      ${radios("no", "Do you have full work proficiency in Norwegian?", ["Yes", "No"])}
+      ${radios("permit", "Do you have a permanent residency or valid work permit for this role?", ["Yes", "No"])}
+      <li class="application-question custom-question"><div class="application-label"><div class="text">Do you have work proficiency in another Nordic language?</div></div>
+        <ul data-qa="checkboxes">${["Danish", "Finnish", "Swedish", "None of the above"].map((o) => `<li><label><input type="checkbox" name="nordic" value="${o}"><span class="application-answer-alternative">${o}</span></label></li>`).join("")}</ul></li>
+      ${radios("hybrid", "I am willing and able to work a hybrid schedule at the office location listed in this job posting.", ["Yes", "No"])}
+      ${radios("kpmg", "Are you a current or former employee of KPMG?", ["Yes - Current or former employee of KPMG", "No - Never employed by KPMG"])}
+      <h4>Non-compete agreement</h4>
+      ${radios("noncompete", "Do you have any non-compete, non-solicitation, confidentiality, or other agreement(s) that may limit your ability to perform the duties of the position for which you are applying?", ["Yes", "No", "Unsure"])}
+    </ul>`;
+    const p: FullProfile = {
+      ...profile,
+      personal: { ...profile.personal, application_prefs: { work_auth: ["norway"], work_mode: "onsite", pronouns: "he", restrictive_agreement: "no" } },
+      languages: [
+        { language: "Norsk", spoken_level: "native", written_level: "native", sort_order: 0 },
+        { language: "Engelsk", spoken_level: "fluent", written_level: "fluent", sort_order: 1 },
+      ],
+      experiences: [{ employer: "Folkebadet Sandvika", title: "Servitør", start_date: "2024-05-01", end_date: "2025-08-01", is_current: false, sort_order: 0 }],
+    };
+    await fillDocument({ profile: p, files: {}, overwrite: false }, document);
+    const checked = (name: string) => Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`)).map((i) => i.value);
+    expect(checked("pronouns")).toEqual(["He/him"]);
+    expect(checked("en")).toEqual(["Yes"]);
+    expect(checked("no")).toEqual(["Yes"]);
+    expect(checked("permit")).toEqual(["Yes"]);
+    expect(checked("nordic")).toEqual(["None of the above"]);
+    expect(checked("hybrid")).toEqual(["Yes"]);
+    expect(checked("kpmg")).toEqual(["No - Never employed by KPMG"]);
+    expect(checked("noncompete")).toEqual(["No"]);
+  }, 30000);
+});

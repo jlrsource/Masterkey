@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useProfile } from "@/lib/profile-store";
 
-type Key = keyof Personal;
+type Key = Exclude<keyof Personal, "application_prefs">;
 interface FieldDef {
   key: Key;
   label: string;

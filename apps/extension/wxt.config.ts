@@ -5,7 +5,8 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   // WXT sin dev-server bruker ellers port 3000, som er web-appens port.
   dev: { server: { port: 3100, origin: "http://localhost:3100" } },
-  vite: () => ({ plugins: [tailwindcss()] }),
+  // Byggetidspunktet vises i popupen, så det er lett å se om Chrome har lastet inn siste versjon.
+  vite: () => ({ plugins: [tailwindcss()], define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) } }),
   manifest: {
     name: "Masterkey",
     description: "Fyll ut jobbsøknader med ett klikk, med profilen din fra Masterkey.",

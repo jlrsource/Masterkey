@@ -354,7 +354,15 @@ export function isSearchInput(el: HTMLInputElement): boolean {
  * noen, som Workday, først etter Enter), og velg det beste treffet. Prøver søkeordene i rekkefølge.
  * Uten treff tømmes feltet igjen, så det ikke står igjen fritekst som siden ikke godtar.
  */
-export async function fillSearchInput(el: HTMLInputElement, terms: string[], opts: { loose?: boolean; fallbackText?: string } = {}): Promise<boolean> {
+/** For å sammenligne stedsnavn: «Tromsø» = «Tromso», uten store bokstaver og aksenter. */
+const plain = (s: string) =>
+  s.toLowerCase().replace(/ø/g, "o").replace(/æ/g, "ae").replace(/å/g, "a").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+
+export async function fillSearchInput(
+  el: HTMLInputElement,
+  terms: string[],
+  opts: { loose?: boolean; fallbackText?: string; mustContain?: string } = {},
+): Promise<boolean> {
   const doc = el.ownerDocument;
   const type = (v: string) => typeLikeUser(el, v);
   await waitFor(() => visibleOptions(doc).length === 0, 800);
@@ -376,6 +384,13 @@ export async function fillSearchInput(el: HTMLInputElement, terms: string[], opt
       options = await waitFor(freshOrLoose, 3000);
     }
     log(`søk «${term}»:`, options ? `${options.length} treff` : "ingen treff funnet");
+    // Sted: treffet må inneholde selve byen. «Blommenholm, NOR» passer ikke «Trondheim, Norway» bare fordi landet stemmer.
+    if (options && opts.mustContain) {
+      const must = plain(opts.mustContain);
+      const kept = options.filter((o) => plain(optionLabel(o)).includes(must));
+      if (kept.length < options.length) log(`  ${options.length - kept.length} treff uten «${opts.mustContain}» hoppes over`);
+      options = kept.length ? kept : null;
+    }
     if (options) {
       const texts = options.map((o) => ({ text: optionLabel(o) }));
       let i = bestOptionIndex(texts, term, 2);
@@ -395,6 +410,11 @@ export async function fillSearchInput(el: HTMLInputElement, terms: string[], opt
   // fra listen, tømmer den feltet selv. Det er bedre enn at vi tømmer et felt som godtar fritekst.
   if (opts.fallbackText) {
     type(opts.fallbackText);
+    // Lukk forslagslisten før vi forlater feltet: ellers velger noen sider det øverste forslaget selv
+    // (Lever valgte «Blommenholm, NOR» når brukeren skulle ha «Trondheim»).
+    key(el, "keydown", "Escape");
+    key(el, "keyup", "Escape");
+    await waitFor(() => visibleOptions(doc).length === 0, 500);
     simulateBlur(el);
     return el.value === opts.fallbackText;
   }

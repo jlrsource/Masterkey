@@ -13,3 +13,4 @@ export * from "./languageMatch";
 export * from "./fieldOfStudy";
 export * from "./countries";
 export * from "./documentLanguage";
+export * from "./applicationAnswers";

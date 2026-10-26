@@ -22,7 +22,7 @@ export type FieldStatus = "filled" | "uncertain" | "skipped-has-value" | "no-val
 
 export interface FieldReport {
   /** Felttype, eller en gjentakende seksjon (arbeidserfaring, utdanning, verv). */
-  key: FieldKey | SectionKind;
+  key: FieldKey | SectionKind | "savedAnswer";
   label: string;
   confidence: number;
   status: FieldStatus;
@@ -58,6 +58,8 @@ export interface PageAnalysis {
 export interface EngineApi {
   analyze(): PageAnalysis;
   fill(payload: FillPayload): Promise<FrameReport>;
+  /** Svar brukeren har fylt inn selv på siden, for «Husk svarene mine». */
+  collectAnswers(): { question: string; answer: string }[];
   clear(): void;
 }
 

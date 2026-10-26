@@ -1,5 +1,5 @@
 import { browser } from "wxt/browser";
-import { clearHighlights, connect, fillActiveTab, getState, refreshProfile, signOut } from "@/lib/background-logic";
+import { clearHighlights, connect, fillActiveTab, getState, refreshProfile, saveAnswers, signOut } from "@/lib/background-logic";
 import type { BgRequest } from "@/lib/messages";
 
 export default defineBackground(() => {
@@ -18,6 +18,8 @@ export default defineBackground(() => {
           return fillActiveTab(msg.overwrite);
         case "CLEAR_HIGHLIGHTS":
           return clearHighlights();
+        case "SAVE_ANSWERS":
+          return saveAnswers();
       }
     };
     handle().then(sendResponse, (e: unknown) => sendResponse({ ok: false, error: String(e) }));

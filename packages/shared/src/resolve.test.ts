@@ -24,6 +24,11 @@ describe("resolveValue", () => {
   it("velger nåværende jobb", () => {
     expect(resolveValue("currentEmployer", profile)).toEqual({ kind: "text", value: "Ny AS" });
   });
+  it("fyller ikke nåværende arbeidsgiver uten nåværende jobb", () => {
+    const p = { ...profile, experiences: profile.experiences.map((e) => ({ ...e, is_current: false })) };
+    expect(resolveValue("currentEmployer", p)).toBeNull();
+    expect(resolveValue("currentTitle", p)).toBeNull();
+  });
   it("henter standardsvar via tag", () => {
     expect(resolveValue("salaryExpectation", profile)).toEqual({ kind: "text", value: "Etter avtale" });
   });

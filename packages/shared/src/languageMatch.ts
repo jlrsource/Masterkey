@@ -97,3 +97,23 @@ export function languageLevelOptionIndex(options: string[], level: LanguageLevel
   }
   return -1;
 }
+
+/** Språkene som nevnes i en tekst («full work proficiency in English» → ["engelsk"]), med norske nøkler. */
+export function languagesIn(text: string): string[] {
+  const words = ` ${clean(text)} `;
+  return Object.entries(LANGUAGE_NAMES)
+    .filter(([key, names]) => [key, ...names].some((n) => words.includes(` ${n} `)))
+    .map(([key]) => key)
+    .filter((k, i, all) => all.indexOf(k) === i && !(k === "mandarin" && all.includes("kinesisk")));
+}
+
+/** Samme språk? Norsk eller engelsk navn på begge sider («Engelsk» = «English»). */
+export function sameLanguage(a: string, b: string): boolean {
+  const key = (s: string) => {
+    const c = clean(s);
+    return Object.entries(LANGUAGE_NAMES).find(([k, names]) => k === c || names.includes(c))?.[0] ?? c;
+  };
+  return key(a) === key(b);
+}
+
+export const LANGUAGE_LEVEL_ORDER = ORDER;

@@ -8,7 +8,14 @@ import {
   fieldOfStudySearchTerms,
   formatDateForInput,
   HIGH_CONFIDENCE,
+  isConsentQuestion,
+  languageOptionPicks,
   latestEducation,
+  QUESTION_DEPENDENT_KEYS,
+  PREF_CHOICE_KEYS,
+  prefAnswer,
+  prefDisplay,
+  prefOptionIndex,
   resolveValue,
   type Classification,
   type FieldKey,
@@ -20,6 +27,7 @@ import type { EngineApi, FieldReport, FilePayload, FillPayload, FrameReport } fr
 import { findAdapter } from "./adapters";
 import { fillRepeatingSections } from "./sections";
 import { base64ToFile, fillUploadPanels, fillUploadWidgets, findUploadPanels, findUploadWidgets, uploadPanelInputs } from "./uploads";
+import { collectAnswers, fillSavedAnswers, fillSavedChoice, questionOf } from "./answers";
 import { log } from "./util";
 import {
   bestOptionIndex,
@@ -56,7 +64,7 @@ function isDialCodeSelect(el: Element): boolean {
 export function classifyDocument(
   doc: Document = document,
   hostname = doc.location?.hostname ?? "",
-): { matches: Match[]; adapter: string | null; unrecognized: string[] } {
+): { matches: Match[]; adapter: string | null; unrecognized: string[]; unrecognizedEls: FillableElement[] } {
   const adapter = findAdapter(hostname);
   const overrides = new Map<Element, FieldKey>();
   for (const rule of adapter?.fields ?? []) {
@@ -69,6 +77,7 @@ export function classifyDocument(
 
   const matches: Match[] = [];
   const unrecognized: string[] = [];
+  const unrecognizedEls: FillableElement[] = [];
   const unclassifiedFiles: HTMLInputElement[] = [];
   let fileInputs = 0;
   for (const el of scanFields(doc)) {
@@ -86,13 +95,14 @@ export function classifyDocument(
     else {
       const text = descriptor.label || descriptor.ariaLabel || descriptor.nearbyText || descriptor.placeholder || descriptor.name;
       if (text) unrecognized.push(text);
+      unrecognizedEls.push(el);
     }
   }
   // Et filfelt uten gjenkjennelig tekst får CV-en bare hvis det er det eneste på siden.
   if (fileInputs === 1 && unclassifiedFiles.length === 1) {
     matches.push({ el: unclassifiedFiles[0]!, result: { key: "cvFile", confidence: 0.5 } });
   }
-  return { matches, adapter: adapter?.name ?? null, unrecognized };
+  return { matches, adapter: adapter?.name ?? null, unrecognized, unrecognizedEls };
 }
 
 /**
@@ -148,6 +158,8 @@ function countryCodeOptionIndex(texts: string[], country: string, profile: FullP
 /** Velger riktig alternativ i en liste for en felttype. */
 function optionMatcher(key: FieldKey, value: string, profile: FullProfile) {
   return (texts: string[]) => {
+    // Faste søknadssvar: «yes» → «Yes»/«Ja», «remote» → «Remote» osv.
+    if (PREF_CHOICE_KEYS.includes(key) || key === "heardAbout") return prefOptionIndex(key, texts, value);
     if (key === "yearsExperience") {
       const i = rangeOptionIndex(texts, Number(value));
       if (i >= 0) return i;
@@ -190,6 +202,47 @@ export function pageLanguage(doc: Document): DocLanguage | null {
 }
 
 
+/** Viser siden at den jobber med filen («Analyzing resume...» hos Lever, eller aria-busy)? */
+function pageIsBusy(doc: Document): boolean {
+  const busy = Array.from(
+    doc.querySelectorAll<HTMLElement>('[class*="upload-working" i], [class*="uploading" i], [class*="parsing" i], [class*="analyzing" i], [aria-busy="true"]'),
+  );
+  if (busy.some((el) => isVisible(el))) return true;
+  return Array.from(doc.querySelectorAll<HTMLElement>("span, div, p")).some(
+    (el) => el.childElementCount === 0 && /analy[sz]ing (resume|cv)|parsing (resume|cv)|analyserer cv|leser cv/i.test(el.textContent ?? "") && isVisible(el),
+  );
+}
+
+/**
+ * Etter CV-opplasting: vent til siden eventuelt har fylt ut felt fra CV-en selv (Lever gjør det
+ * når den er ferdig med «Analyzing resume...»). Returnerer feltene som var tomme før og har fått verdi.
+ * Viser ikke siden noe arbeid og ingenting endres innen 4 sekunder, regner vi med at den ikke leser CV-en.
+ */
+async function waitForPageAutofill(doc: Document, before: Map<Element, string | null>, value: (el: Element) => string | null): Promise<Set<Element>> {
+  const changed = () => Array.from(before).filter(([el, v]) => v === "" && (value(el) ?? "") !== "").map(([el]) => el);
+  const start = Date.now();
+  let last = 0;
+  let stableSince = Date.now();
+  let sawBusy = false;
+  while (Date.now() - start < 30000) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (pageIsBusy(doc)) {
+      if (!sawBusy) log("venter mens siden leser CV-en …");
+      sawBusy = true;
+      stableSince = Date.now();
+      continue;
+    }
+    const n = changed().length;
+    if (n !== last) {
+      last = n;
+      stableSince = Date.now();
+    }
+    if (n === 0 && !sawBusy && Date.now() - start > 4000) break;
+    if (Date.now() - stableSince > 1200 && (n > 0 || sawBusy)) break;
+  }
+  return new Set(changed());
+}
+
 /** Ett felt per type for de fleste nøkler. Unntaket er e-post, der «bekreft e-post» også skal fylles. */
 const MULTI_ALLOWED: FieldKey[] = ["email", "country", "city"];
 
@@ -207,14 +260,30 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   /** Tekstfelt vi fylte, for kontrollrunden etterpå. */
   const filledText: { el: HTMLInputElement | HTMLTextAreaElement; value: string }[] = [];
 
-  // Sikreste treff først, så de vinner hvis flere felt matcher samme nøkkel.
-  matches.sort((a, b) => b.result.confidence - a.result.confidence);
+  // Filer først: noen sider (Lever) leser CV-en og fyller ut felt fra den. Det skal skje før vi
+  // fyller ut, så profilens verdier vinner. Ellers sikreste treff først, så de vinner hvis flere
+  // felt matcher samme nøkkel.
+  const isFileInput = (el: Element) => el instanceof HTMLInputElement && el.type === "file";
+  matches.sort((a, b) => Number(isFileInput(b.el)) - Number(isFileInput(a.el)) || b.result.confidence - a.result.confidence);
+  const textValue = (el: Element) => (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : null);
+  const valuesBefore = new Map(matches.filter((m) => !isFileInput(m.el)).map((m) => [m.el, textValue(m.el)]));
+  let cvUploaded = false;
+  let settled = false;
+  /** Felt siden fylte selv etter at vi lastet opp CV-en (Levers CV-lesing). De er ikke brukerens. */
+  let filledByPage = new Set<Element>();
+  /** Felt vi kjente igjen, men der profilen ikke har noe svar: kanskje brukeren har svart før. */
+  const noValue: FillableElement[] = [];
 
   // Har siden eget felt for vitnemål, skal karakterutskriften dit og ikke sammen med CV-en.
   const hasDiplomaField = matches.some((m) => m.result.key === "diplomaFile");
 
   for (const { el, result } of matches) {
     const { key, confidence } = result;
+    if (cvUploaded && !settled && !isFileInput(el)) {
+      settled = true;
+      filledByPage = await waitForPageAutofill(doc, valuesBefore, textValue);
+      if (filledByPage.size) log(`siden fylte ${filledByPage.size} felt fra CV-en selv; profilen vinner`);
+    }
     const report: FieldReport = { key, label: FIELD_LABELS[key], confidence, status: "no-value" };
     fields.push(report);
 
@@ -224,12 +293,26 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
     }
     // Første alternativ i en landskode-liste («AC +247») er bare et alfabetisk standardvalg, ikke brukerens.
     const defaultDialCode = isDialCodeSelect(el) && (el as HTMLSelectElement).selectedIndex === 0;
-    if (!payload.overwrite && hasValue(el) && !defaultDialCode) {
+    if (!payload.overwrite && hasValue(el) && !defaultDialCode && !filledByPage.has(el)) {
       report.status = "skipped-has-value";
       continue;
     }
-    const value = resolveValue(key, payload.profile);
-    if (!value) continue;
+    const question = questionOf(el);
+    // Samtykker og erklæringer krysser vi aldri av.
+    if (PREF_CHOICE_KEYS.includes(key) && isConsentQuestion(question)) continue;
+    // Arbeidstillatelse avhenger av landet spørsmålet nevner. Uten land er svaret en gjetning (Norge).
+    const dependent = QUESTION_DEPENDENT_KEYS.includes(key);
+    const pref = dependent ? prefAnswer(key, payload.profile, question) : null;
+    const value = pref ? ({ kind: "text", value: pref.value } as const) : dependent ? null : resolveValue(key, payload.profile);
+    if (!value) {
+      noValue.push(el);
+      // Siden gjettet en verdi fra CV-en som profilen ikke har (f.eks. «Current company» uten nåværende jobb).
+      if (filledByPage.has(el) && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+        setTextValue(el, "");
+        log(`tømte «${FIELD_LABELS[key]}», som siden fylte fra CV-en (finnes ikke i profilen)`);
+      }
+      continue;
+    }
 
     let ok = false;
     try {
@@ -244,6 +327,7 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
           report.label = `${FIELD_LABELS[key]}: ${all.map((f) => f.name).join(", ")}`;
           if (key === "cvFile" && el.multiple && !hasDiplomaField && !extras.length) report.label += " (fant ingen vitnemål/karakterutskrift i profilen)";
           log(`filfelt ${el.multiple ? "(flere filer) " : ""}← ${all.map((f) => f.name).join(", ")} ${ok ? "✓" : "✗"}`);
+          if (ok && key === "cvFile") cvUploaded = true;
         }
       } else if (el instanceof HTMLSelectElement && key === "birthDate" && fillDateSelects(el, value.value) > 0) {
         // Dato delt i flere lister (år/måned/dag): alle delene er fylt.
@@ -251,18 +335,24 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
       } else if (el instanceof HTMLSelectElement) {
         const options = Array.from(el.options);
         const i = optionMatcher(key, value.value, payload.profile)(options.map((o) => o.text));
-        ok = i >= 0 ? setSelectValue(el, options[i]!.text) : setSelectValue(el, value.value);
+        ok = i >= 0 ? setSelectValue(el, options[i]!.text) : !PREF_CHOICE_KEYS.includes(key) && setSelectValue(el, value.value);
       } else if (el instanceof HTMLInputElement && isSearchInput(el)) {
         // Søkefelt (react-select, autocomplete …): skriv, vent på treff og velg fra listen.
         ok = await fillSearchInput(el, searchTermsFor(key, value.value, payload.profile), {
           loose: key === "fieldOfStudy",
           fallbackText: value.value,
+          mustContain: key === "city" || key === "studyCity" ? value.value : undefined,
         });
       } else if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !el.isContentEditable) {
         // Egendefinert nedtrekksliste (knapp som åpner en liste).
         ok = await pickFromListbox(el, optionMatcher(key, value.value, payload.profile));
       } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        const text = key === "birthDate" ? formatDateForInput(value.value, (el as HTMLInputElement).type) : value.value;
+        const text =
+          key === "birthDate"
+            ? formatDateForInput(value.value, (el as HTMLInputElement).type)
+            : PREF_CHOICE_KEYS.includes(key)
+              ? prefDisplay(key, value.value)
+              : value.value;
         setTextValue(el, text);
         ok = true;
       } else {
@@ -279,10 +369,18 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
     }
     used.add(key);
     if ((el instanceof HTMLInputElement && el.type !== "file") || el instanceof HTMLTextAreaElement) filledText.push({ el, value: el.value });
-    const sure = confidence >= HIGH_CONFIDENCE;
+    const sure = confidence >= HIGH_CONFIDENCE && pref?.sure !== false;
     report.status = sure ? "filled" : "uncertain";
     highlight(el, sure ? "filled" : "uncertain", sure ? `Masterkey: ${FIELD_LABELS[key]}` : `Masterkey: ${FIELD_LABELS[key]}? Sjekk at dette stemmer.`);
   }
+
+  // Husket svar: felt ingen regel kjente igjen (eller profilen ikke har svar på), men som brukeren
+  // har svart på i en tidligere søknad.
+  const rest = [...classified.unrecognizedEls.filter((el) => !sections.handled.has(el) && !panelInputs.has(el)), ...noValue].filter(
+    (el) => !(el instanceof HTMLInputElement && el.type === "file"),
+  );
+  const remembered = await fillSavedAnswers(payload.profile, rest, payload.overwrite);
+  fields.push(...remembered);
 
   // Kontrollrunde: noen sider tømmer felt etterpå (f.eks. «By» slås opp fra postnummeret når
   // postnummerfeltet mister fokus). Fyll dem én gang til hvis de ble tømt.
@@ -308,8 +406,17 @@ function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: numb
   const fields: FieldReport[] = [];
   let detected = 0;
   for (const group of scanChoiceGroups(doc)) {
+    // Samtykker og erklæringer krysser vi aldri av.
+    if (isConsentQuestion(group.question)) continue;
     const result = group.question ? classifyField({ tag: "input", type: "text", label: group.question }) : null;
-    if (!result) continue;
+    if (!result) {
+      const saved = fillSavedChoice(payload.profile, group, payload.overwrite);
+      if (saved) {
+        detected++;
+        fields.push(saved);
+      }
+      continue;
+    }
     detected++;
     const report: FieldReport = { key: result.key, label: FIELD_LABELS[result.key], confidence: result.confidence, status: "no-value" };
     fields.push(report);
@@ -318,14 +425,36 @@ function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: numb
       report.status = "skipped-has-value";
       continue;
     }
-    const value = resolveValue(result.key, payload.profile);
-    if (!value || value.kind !== "text") continue;
+    // Språk som alternativer (Danish / Finnish / Swedish / None of the above): kryss av det brukeren kan.
+    if (result.key === "languageProficiency") {
+      const picks = languageOptionPicks(group.options.map((o) => o.text), group.question, payload.profile);
+      if (picks && (picks.length === 1 || group.options[0]?.el.type === "checkbox")) {
+        for (const i of picks) {
+          checkOption(group.options[i]!.el);
+          highlight(group.options[i]!.el.labels?.[0] ?? group.options[i]!.el, "filled", `Masterkey: ${FIELD_LABELS[result.key]}`);
+        }
+        report.status = "filled";
+        continue;
+      }
+    }
+    // Faste søknadssvar (Ja/Nei, arbeidsform …). Arbeidstillatelse avhenger av landet i spørsmålet.
+    const isPref = PREF_CHOICE_KEYS.includes(result.key) || result.key === "heardAbout";
+    const pref = isPref ? prefAnswer(result.key, payload.profile, group.question) : null;
+    const value = pref ? pref.value : isPref ? null : resolveValue(result.key, payload.profile);
+    const text = typeof value === "string" ? value : value?.kind === "text" ? value.value : null;
+    if (!text) {
+      // Ingen fast svar: kanskje brukeren har svart på akkurat dette spørsmålet før.
+      const saved = fillSavedChoice(payload.profile, group, payload.overwrite);
+      if (saved) fields.splice(fields.indexOf(report), 1, saved);
+      continue;
+    }
     // Krever minst «starter med»-treff, så vi ikke krysser av noe som bare ligner litt.
-    const option = group.options[bestOptionIndex(group.options, value.value, 2)];
+    const i = isPref ? prefOptionIndex(result.key, group.options.map((o) => o.text), text) : bestOptionIndex(group.options, text, 2);
+    const option = group.options[i];
     if (!option) continue;
 
     checkOption(option.el);
-    const sure = result.confidence >= HIGH_CONFIDENCE;
+    const sure = result.confidence >= HIGH_CONFIDENCE && pref?.sure !== false;
     report.status = sure ? "filled" : "uncertain";
     highlight(option.el.labels?.[0] ?? option.el, sure ? "filled" : "uncertain", `Masterkey: ${FIELD_LABELS[result.key]}`);
   }
@@ -347,6 +476,7 @@ export function createEngine(doc: Document = document): EngineApi {
       return { keys, adapter, lang: pageLanguage(doc) };
     },
     fill: (payload) => fillDocument(payload, doc),
+    collectAnswers: () => collectAnswers(doc),
     clear: () => clearHighlights(doc),
   };
 }

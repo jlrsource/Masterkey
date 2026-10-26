@@ -1,4 +1,4 @@
-import { Briefcase, FileText, LayoutDashboard, MessageSquareText, Puzzle, Sparkles, User } from "lucide-react";
+import { Briefcase, FileText, LayoutDashboard, ListChecks, MessageSquareText, Puzzle, Sparkles, User } from "lucide-react";
 
 export const NAV = [
   { href: "/app", label: "Oversikt", icon: LayoutDashboard },
@@ -6,6 +6,7 @@ export const NAV = [
   { href: "/app/erfaring", label: "Erfaring og utdanning", icon: Briefcase },
   { href: "/app/ferdigheter", label: "Ferdigheter og språk", icon: Sparkles },
   { href: "/app/dokumenter", label: "Dokumenter", icon: FileText },
+  { href: "/app/soknadssvar", label: "Søknadssvar", icon: ListChecks },
   { href: "/app/svar", label: "Standardsvar", icon: MessageSquareText },
   { href: "/app/extension", label: "Chrome-extension", icon: Puzzle },
 ] as const;

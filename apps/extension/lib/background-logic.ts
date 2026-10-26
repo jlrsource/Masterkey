@@ -1,5 +1,5 @@
 import { browser } from "wxt/browser";
-import { emptyProfile, fullProfileSchema, pickDocument, type DocLanguage, type FullProfile, type ProfileDocument } from "@soknadsprofil/shared";
+import { emptyProfile, fullProfileSchema, normalize, pickDocument, REMEMBERED_TAG, type DocLanguage, type FullProfile, type ProfileDocument } from "@soknadsprofil/shared";
 import type { ExtState } from "./messages";
 import { supabase } from "./supabase";
 import type { FileKey, FilePayload, FillPayload, FillSummary, FrameReport, PageAnalysis } from "./types";
@@ -161,4 +161,45 @@ export async function clearHighlights() {
     .executeScript({ target: { tabId: tab.id, allFrames: true }, func: () => window.__soknadsprofil?.clear() })
     .catch(() => undefined);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------- husk svarene
+
+/**
+ * Lagrer svarene brukeren har fylt inn selv på siden som standardsvar (tag «husket»), så de fylles
+ * ut neste gang samme spørsmål dukker opp. Finnes spørsmålet fra før, oppdateres svaret.
+ */
+export async function saveAnswers(): Promise<{ ok: true; added: number; updated: number } | { ok: false; error: string }> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url || !/^https?:/.test(tab.url)) return { ok: false, error: "Denne siden kan ikke leses." };
+  if (!(await currentEmail())) return { ok: false, error: "Koble til Masterkey først." };
+  const profile = await getProfile();
+  if (!profile) return { ok: false, error: "Fant ingen profil. Sjekk internettforbindelsen." };
+
+  await ensureEngine(tab.id);
+  const results = await browser.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    func: () => window.__soknadsprofil?.collectAnswers() ?? [],
+  });
+  const answers = results.flatMap((r) => (r.result as { question: string; answer: string }[] | undefined) ?? []);
+  if (!answers.length) return { ok: true, added: 0, updated: 0 };
+
+  const existing = new Map((profile.saved_answers ?? []).map((a) => [normalize(a.question), a]));
+  let added = 0;
+  let updated = 0;
+  for (const { question, answer } of answers) {
+    const old = existing.get(normalize(question));
+    if (old?.answer === answer) continue;
+    const { error } = old?.id
+      ? await supabase.from("saved_answers").update({ answer }).eq("id", old.id)
+      : await supabase.from("saved_answers").insert({ question, answer, tags: [REMEMBERED_TAG] });
+    if (error) {
+      console.warn("[Masterkey] kunne ikke lagre svar", error);
+      return { ok: false, error: "Kunne ikke lagre svarene. Prøv igjen." };
+    }
+    if (old) updated++;
+    else added++;
+  }
+  await refreshProfile();
+  return { ok: true, added, updated };
 }

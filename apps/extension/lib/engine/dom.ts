@@ -497,6 +497,7 @@ export function setFileValue(el: HTMLInputElement, files: File | File[]): boolea
 // ---------------------------------------------------------------- markering
 
 const MARK_ATTR = "data-soknadsprofil";
+export const FILLED_ATTR = "data-masterkey-filled";
 const COLORS = { filled: "#22c55e", uncertain: "#f59e0b" } as const;
 
 export function highlight(el: Element, kind: keyof typeof COLORS, title: string) {
@@ -505,6 +506,8 @@ export function highlight(el: Element, kind: keyof typeof COLORS, title: string)
     target.setAttribute(`${MARK_ATTR}-prev`, target.getAttribute("style") ?? "");
   }
   target.setAttribute(MARK_ATTR, kind);
+  // Varig merke (fjernes ikke med markeringene): «Husk svarene» skal bare lagre det brukeren fylte selv.
+  target.setAttribute(FILLED_ATTR, "1");
   target.style.setProperty("outline", `2px solid ${COLORS[kind]}`, "important");
   target.style.setProperty("outline-offset", "1px", "important");
   target.style.setProperty("transition", "outline-color .3s", "important");
