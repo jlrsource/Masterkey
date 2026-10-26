@@ -39,6 +39,19 @@ const OPTION_WORDS: Record<string, Record<string, RegExp>> = {
   workMode: { onsite: /on ?site|in (the )?office|kontor|på stedet|fysisk/, hybrid: /hybrid/, remote: /remote|hjemmekontor|fjern|work from home/ },
   employmentType: { fulltime: /full|heltid|100/, parttime: /part|deltid/ },
   pronouns: { he: /\b(he|him|han|ham)\b/, she: /\b(she|her|hun|henne)\b/, they: /\b(they|them|hen)\b/ },
+  heardAbout: {
+    linkedin: /linkedin/,
+    finn: /\bfinn\b/,
+    nav: /\bnav\b/,
+    company_website: /website|careers? (page|site)|company (site|page)|nettside|karriereside|hjemmeside/,
+    university: /universit|college|career fair|campus|student|karrieredag|karrieremesse|bedriftspresentasjon|school/,
+    referral: /referr|referred|employee|friend|colleague|ansatt|venn|kollega|anbefal/,
+    social_media: /social media|facebook|instagram|twitter|tiktok|sosiale medier/,
+    job_board: /job board|indeed|glassdoor|jobbportal|stillingsportal|wellfound|monster/,
+    recruiter: /recruiter|headhunter|rekrutter|search firm|agency/,
+    event: /event|conference|konferanse|arrangement|meetup/,
+    other: /^(other|annet|andre)\b/,
+  },
   gender: {
     man: /\b(man|male|mann)\b/,
     woman: /\b(woman|female|kvinne)\b/,
@@ -67,6 +80,11 @@ const DISPLAY: Record<string, Record<string, string>> = {
   workMode: { onsite: "På kontoret", hybrid: "Hybrid", remote: "Hjemmekontor" },
   employmentType: { fulltime: "Heltid", parttime: "Deltid" },
   pronouns: { he: "Han/ham", she: "Hun/henne", they: "Hen" },
+  heardAbout: {
+    linkedin: "LinkedIn", finn: "Finn.no", nav: "NAV", company_website: "Bedriftens nettside", university: "Universitet/karrieredag",
+    referral: "Tips fra en ansatt eller bekjent", social_media: "Sosiale medier", job_board: "Annen jobbportal", recruiter: "Rekrutterer/headhunter",
+    event: "Arrangement/konferanse", other: "Annet",
+  },
   gender: { man: "Mann", woman: "Kvinne", nonbinary: "Ikke-binær", undisclosed: "Ønsker ikke å oppgi" },
 };
 
@@ -123,7 +141,9 @@ export function prefAnswer(key: FieldKey, p: FullProfile, question = ""): { valu
     case "pronouns": return a.pronouns ? { value: a.pronouns, sure: true } : null;
     case "gender": return a.gender ? { value: a.gender, sure: true } : null;
     case "noticePeriod": return a.notice_period?.trim() ? { value: a.notice_period.trim(), sure: true } : null;
-    case "heardAbout": return a.heard_about?.trim() ? { value: a.heard_about.trim(), sure: true } : null;
+    case "heardAbout":
+      if (a.heard_about_source) return { value: a.heard_about_source, sure: true };
+      return a.heard_about?.trim() ? { value: a.heard_about.trim(), sure: true } : null;
     case "availability": return a.earliest_start?.trim() ? { value: a.earliest_start.trim(), sure: true } : null;
     default: return null;
   }
@@ -147,6 +167,25 @@ export function languageOptionPicks(texts: string[], question: string, p: FullPr
   if (picks.length) return picks;
   const none = texts.findIndex((t) => /none|ingen|not applicable|ikke aktuelt/.test(normalize(t)));
   return none >= 0 ? [none] : null;
+}
+
+/**
+ * «Hvor hørte du om stillingen?» i en liste: kategorien, ellers «Other». `other` er true når «Other»
+ * ble valgt fordi kategorien manglet, så utdypingen skal i «If you selected Other, please specify».
+ */
+export function heardAboutOptionIndex(texts: string[], source: string): { index: number; other: boolean } {
+  const i = prefOptionIndex("heardAbout", texts, source);
+  if (i >= 0) return { index: i, other: source === "other" };
+  const other = prefOptionIndex("heardAbout", texts, "other");
+  return { index: other, other: other >= 0 };
+}
+
+/** Utdypingen på sidens språk (engelsk når siden er engelsk og oversettelsen finnes). */
+export function heardAboutDetail(p: FullProfile, lang: "en" | "no" | null): string | null {
+  const a = prefs(p);
+  const en = a.heard_about_en?.trim();
+  const no = a.heard_about?.trim();
+  return (lang === "en" ? en || no : no || en) || null;
 }
 
 /** Teksten som skrives i et vanlig tekstfelt («Ja», «Hybrid» …). */

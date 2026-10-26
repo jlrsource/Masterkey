@@ -11,6 +11,9 @@ export const WORK_MODES = ["onsite", "hybrid", "remote"] as const;
 export const EMPLOYMENT_TYPES = ["fulltime", "parttime"] as const;
 export const PRONOUNS = ["he", "she", "they"] as const;
 export const GENDERS = ["man", "woman", "nonbinary", "undisclosed"] as const;
+export const HEARD_ABOUT_SOURCES = [
+  "linkedin", "finn", "nav", "company_website", "university", "referral", "social_media", "job_board", "recruiter", "event", "other",
+] as const;
 
 /**
  * Faste svar på spørsmål som går igjen i søknadsskjemaer («Do you require sponsorship?»).
@@ -28,7 +31,12 @@ export const applicationPrefsSchema = z.object({
   drivers_license: z.enum(YES_NO).nullish(),
   /** Konkurranse-, kunde- eller taushetsklausul som kan begrense brukeren i en ny jobb. */
   restrictive_agreement: z.enum(YES_NO).nullish(),
+  /** Kategori for «Hvor hørte du om stillingen?», brukt til å velge i lister. */
+  heard_about_source: z.enum(HEARD_ABOUT_SOURCES).nullish(),
+  /** Utdyping på norsk («Via bedriftskontakter på NTNU»), til fritekst og «Other, please specify». */
   heard_about: optionalText,
+  /** Samme utdyping på engelsk, til skjemaer på engelsk (laget automatisk, kan endres). */
+  heard_about_en: optionalText,
   pronouns: z.enum(PRONOUNS).nullish(),
   gender: z.enum(GENDERS).nullish(),
 });

@@ -3,6 +3,7 @@
 import {
   EMPLOYMENT_TYPES,
   GENDERS,
+  HEARD_ABOUT_SOURCES,
   PRONOUNS,
   WORK_MODES,
   WORK_REGIONS,
@@ -19,7 +20,7 @@ import { useProfile } from "@/lib/profile-store";
 import { cn } from "@/lib/utils";
 
 type ChoiceKey = "needs_sponsorship" | "relocate" | "work_mode" | "employment_type" | "drivers_license" | "restrictive_agreement" | "pronouns" | "gender";
-type TextKey = "notice_period" | "earliest_start" | "heard_about";
+type TextKey = "notice_period" | "earliest_start";
 
 const LABELS: Record<string, string> = {
   yes: "Ja",
@@ -67,14 +68,29 @@ const PERSONAL_CHOICES: typeof CHOICES = [
 const TEXTS: { key: TextKey; label: string; placeholder: string }[] = [
   { key: "notice_period", label: "Oppsigelsestid", placeholder: "F.eks. 3 måneder" },
   { key: "earliest_start", label: "Tidligste oppstart", placeholder: "F.eks. Etter avtale, eller 1. august 2026" },
-  { key: "heard_about", label: "Hvor hører du vanligvis om stillinger?", placeholder: "F.eks. LinkedIn" },
 ];
+
+const SOURCE_LABELS: Record<(typeof HEARD_ABOUT_SOURCES)[number], string> = {
+  linkedin: "LinkedIn",
+  finn: "Finn.no",
+  nav: "NAV",
+  company_website: "Bedriftens nettside",
+  university: "Universitet/karrieredag",
+  referral: "Tips fra en ansatt eller bekjent",
+  social_media: "Sosiale medier",
+  job_board: "Annen jobbportal",
+  recruiter: "Rekrutterer/headhunter",
+  event: "Arrangement/konferanse",
+  other: "Annet",
+};
 
 type SaveState = "idle" | "saving" | "saved";
 
 export default function SoknadssvarPage() {
   const { profile, loading, updatePersonal } = useProfile();
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [translating, setTranslating] = useState(false);
+  const [english, setEnglish] = useState<string | null>(null);
 
   if (loading) return <LoadingBlock />;
   const prefs: ApplicationPrefs = profile.personal?.application_prefs ?? {};
@@ -84,6 +100,26 @@ export default function SoknadssvarPage() {
     await updatePersonal({ application_prefs: { ...prefs, ...patch } });
     setSaveState("saved");
     setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1800);
+  }
+
+  /** Lagre utdypingen og lag en engelsk versjon til skjemaer på engelsk. */
+  async function saveHeardAbout(text: string) {
+    if (text === (prefs.heard_about ?? "")) return;
+    if (!text) {
+      setEnglish("");
+      return save({ heard_about: null, heard_about_en: null });
+    }
+    setTranslating(true);
+    let en = prefs.heard_about_en ?? null;
+    try {
+      const res = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      if (res.ok) en = ((await res.json()) as { english?: string }).english || en;
+    } catch {
+      // Uten oversettelse brukes den norske teksten; brukeren kan skrive den engelske selv.
+    }
+    setTranslating(false);
+    setEnglish(en ?? "");
+    await save({ heard_about: text, heard_about_en: en });
   }
 
   const toggleRegion = (r: (typeof WORK_REGIONS)[number]) => {
@@ -144,7 +180,7 @@ export default function SoknadssvarPage() {
         </section>
 
         <section>
-          <SectionTitle title="Tid og kilde" description="Fylles inn i tekstfelt og nedtrekkslister." />
+          <SectionTitle title="Oppstart" description="Fylles inn i tekstfelt og nedtrekkslister." />
           <Card className="grid gap-5 p-6 sm:grid-cols-2">
             {TEXTS.map((t) => (
               <Field key={t.key} label={t.label} htmlFor={`pref-${t.key}`}>
@@ -159,6 +195,44 @@ export default function SoknadssvarPage() {
                 />
               </Field>
             ))}
+          </Card>
+        </section>
+
+        <section>
+          <SectionTitle
+            title="Hvor hørte du om stillingen?"
+            description="Velges i lister som «How did you hear about us?». Finnes ikke kategorien, velger extensionen «Annet» og skriver utdypingen."
+          />
+          <Card className="grid gap-5 p-6 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <div className="flex flex-wrap gap-2">
+                {HEARD_ABOUT_SOURCES.map((s) => (
+                  <Chip key={s} active={prefs.heard_about_source === s} onClick={() => void save({ heard_about_source: prefs.heard_about_source === s ? null : s })}>
+                    {SOURCE_LABELS[s]}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+            <Field label="Utdyping" htmlFor="pref-heard_about" hint="Brukes i fritekstfelt og «Annet, spesifiser».">
+              <Input
+                id="pref-heard_about"
+                defaultValue={prefs.heard_about ?? ""}
+                placeholder="F.eks. Via bedriftskontakter på NTNU"
+                onBlur={(e) => void saveHeardAbout(e.target.value.trim())}
+              />
+            </Field>
+            <Field label="På engelsk" htmlFor="pref-heard_about_en" hint={translating ? "Oversetter …" : "Lages automatisk. Du kan endre den."}>
+              <Input
+                key={english ?? prefs.heard_about_en ?? ""}
+                id="pref-heard_about_en"
+                defaultValue={english ?? prefs.heard_about_en ?? ""}
+                placeholder="F.eks. Through company contacts at NTNU"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v !== (prefs.heard_about_en ?? "")) void save({ heard_about_en: v || null });
+                }}
+              />
+            </Field>
           </Card>
         </section>
 

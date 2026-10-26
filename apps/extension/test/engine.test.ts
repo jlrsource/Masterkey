@@ -1584,3 +1584,56 @@ describe("Lever-spørsmål som besvares fra profilen (fra test 27. okt)", () => 
     expect(checked("noncompete")).toEqual(["No"]);
   }, 30000);
 });
+
+describe("Greenhouse: lister med søkefelt (react-select) for pronomen, kjønn og «How did you hear about us?»", () => {
+  function select(id: string, label: string, options: string[]) {
+    return `<div class="field"><label for="${id}">${label}</label>
+      <div class="select__control"><div class="select__value"><div class="select__placeholder">Select...</div>
+        <input id="${id}" role="combobox" aria-autocomplete="list" aria-expanded="false" type="text" value=""></div></div>
+      <div class="menu" data-for="${id}" data-options="${options.join("|")}"></div></div>`;
+  }
+  function greenhousePage(heardOptions: string[]) {
+    document.documentElement.lang = "en";
+    document.body.innerHTML = `<h1>Apply for this job. Please answer the questions below about your application and experience with the role.</h1>
+      ${select("pron", "What are your preferred pronouns?", ["She/Her/Hers", "He/Him/His", "They/Them/Theirs"])}
+      ${select("hear", "How did you hear about us? *", heardOptions)}
+      <div class="field"><label for="other">If you selected "Other," please specify: *</label><input id="other" type="text"></div>
+      ${select("gender", "Gender", ["Male", "Female", "Decline To Self Identify"])}`;
+    document.querySelectorAll<HTMLInputElement>("input[role=combobox]").forEach((input) => {
+      const menu = document.querySelector<HTMLElement>(`.menu[data-for="${input.id}"]`)!;
+      const open = () => {
+        menu.innerHTML = `<div role="listbox">${menu.dataset.options!.split("|").map((o) => `<div role="option">${o}</div>`).join("")}</div>`;
+        menu.querySelectorAll<HTMLElement>("[role=option]").forEach((o) =>
+          o.addEventListener("click", () => {
+            input.closest(".select__control")!.querySelector(".select__placeholder")!.textContent = o.textContent;
+            input.dataset.chosen = o.textContent!;
+            menu.innerHTML = "";
+          }),
+        );
+      };
+      input.addEventListener("mousedown", open);
+      input.addEventListener("keydown", (e) => e.key === "ArrowDown" && open());
+    });
+  }
+  const p = (source: string, detail: string, en: string): FullProfile => ({
+    ...profile,
+    personal: { ...profile.personal, application_prefs: { pronouns: "he", gender: "man", heard_about_source: source as "university", heard_about: detail, heard_about_en: en } },
+  });
+
+  it("velger fra listene, og «Other» med engelsk utdyping når kategorien mangler", async () => {
+    greenhousePage(["LinkedIn", "Wellfound", "Social Media", "Oklo Employee", "Company Website / Careers Page", "Other"]);
+    await fillDocument({ profile: p("university", "Via bedriftskontakter på NTNU", "Through company contacts at NTNU"), files: {}, overwrite: false }, document);
+    const chosen = (id: string) => (document.getElementById(id) as HTMLInputElement).dataset.chosen;
+    expect(chosen("pron")).toBe("He/Him/His");
+    expect(chosen("gender")).toBe("Male");
+    expect(chosen("hear")).toBe("Other");
+    expect((document.getElementById("other") as HTMLInputElement).value).toBe("Through company contacts at NTNU");
+  }, 30000);
+
+  it("velger kategorien når den finnes, og lar «please specify» være", async () => {
+    greenhousePage(["LinkedIn", "University Career Fair", "Other"]);
+    await fillDocument({ profile: p("university", "Via bedriftskontakter på NTNU", "Through company contacts at NTNU"), files: {}, overwrite: false }, document);
+    expect((document.getElementById("hear") as HTMLInputElement).dataset.chosen).toBe("University Career Fair");
+    expect((document.getElementById("other") as HTMLInputElement).value).toBe("");
+  }, 30000);
+});

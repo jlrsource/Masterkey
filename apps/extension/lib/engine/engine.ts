@@ -8,6 +8,8 @@ import {
   fieldOfStudySearchTerms,
   formatDateForInput,
   HIGH_CONFIDENCE,
+  heardAboutDetail,
+  heardAboutOptionIndex,
   isConsentQuestion,
   languageOptionPicks,
   latestEducation,
@@ -37,6 +39,7 @@ import {
   inLoginForm,
   describeField,
   hasValue,
+  norm,
   highlight,
   scanChoiceGroups,
   scanFields,
@@ -158,8 +161,9 @@ function countryCodeOptionIndex(texts: string[], country: string, profile: FullP
 /** Velger riktig alternativ i en liste for en felttype. */
 function optionMatcher(key: FieldKey, value: string, profile: FullProfile) {
   return (texts: string[]) => {
-    // Faste søknadssvar: «yes» → «Yes»/«Ja», «remote» → «Remote» osv.
-    if (PREF_CHOICE_KEYS.includes(key) || key === "heardAbout") return prefOptionIndex(key, texts, value);
+    // Faste søknadssvar: «yes» → «Yes»/«Ja», «remote» → «Remote» osv. Hørte om oss: kategorien, ellers «Other».
+    if (key === "heardAbout") return heardAboutOptionIndex(texts, value).index;
+    if (PREF_CHOICE_KEYS.includes(key)) return prefOptionIndex(key, texts, value);
     if (key === "yearsExperience") {
       const i = rangeOptionIndex(texts, Number(value));
       if (i >= 0) return i;
@@ -273,6 +277,8 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   let filledByPage = new Set<Element>();
   /** Felt vi kjente igjen, men der profilen ikke har noe svar: kanskje brukeren har svart før. */
   const noValue: FillableElement[] = [];
+  /** «How did you hear about us?» ble besvart med «Other»: utdypingen skal i «please specify». */
+  let heardAboutOther = false;
 
   // Har siden eget felt for vitnemål, skal karakterutskriften dit og ikke sammen med CV-en.
   const hasDiplomaField = matches.some((m) => m.result.key === "diplomaFile");
@@ -336,6 +342,10 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
         const options = Array.from(el.options);
         const i = optionMatcher(key, value.value, payload.profile)(options.map((o) => o.text));
         ok = i >= 0 ? setSelectValue(el, options[i]!.text) : !PREF_CHOICE_KEYS.includes(key) && setSelectValue(el, value.value);
+      } else if (el instanceof HTMLInputElement && isSearchInput(el) && (PREF_CHOICE_KEYS.includes(key) || key === "heardAbout")) {
+        // Fast liste med søkefelt (react-select hos Greenhouse): åpne listen og velg alternativet som
+        // passer svaret, i stedet for å søke på «he» eller «man».
+        ok = await pickFromListbox(el, optionMatcher(key, value.value, payload.profile));
       } else if (el instanceof HTMLInputElement && isSearchInput(el)) {
         // Søkefelt (react-select, autocomplete …): skriv, vent på treff og velg fra listen.
         ok = await fillSearchInput(el, searchTermsFor(key, value.value, payload.profile), {
@@ -350,9 +360,11 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
         const text =
           key === "birthDate"
             ? formatDateForInput(value.value, (el as HTMLInputElement).type)
-            : PREF_CHOICE_KEYS.includes(key)
-              ? prefDisplay(key, value.value)
-              : value.value;
+            : key === "heardAbout"
+              ? (heardAboutDetail(payload.profile, pageLanguage(doc)) ?? prefDisplay(key, value.value))
+              : PREF_CHOICE_KEYS.includes(key)
+                ? prefDisplay(key, value.value)
+                : value.value;
         setTextValue(el, text);
         ok = true;
       } else {
@@ -368,6 +380,9 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
       continue;
     }
     used.add(key);
+    if (key === "heardAbout" && !(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement && !isSearchInput(el))) {
+      heardAboutOther ||= /^(other|annet|andre)\b/i.test(shownText(el).trim());
+    }
     if ((el instanceof HTMLInputElement && el.type !== "file") || el instanceof HTMLTextAreaElement) filledText.push({ el, value: el.value });
     const sure = confidence >= HIGH_CONFIDENCE && pref?.sure !== false;
     report.status = sure ? "filled" : "uncertain";
@@ -393,6 +408,8 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
 
   const groups = fillChoiceGroups(payload, doc);
   fields.push(...groups.fields);
+  if (groups.heardAboutOther) heardAboutOther = true;
+  if (heardAboutOther) fields.push(...fillOtherSpecify(payload, doc));
 
   // Vedleggsfelt der filfeltet først dukker opp etter klikk på «+» (SuccessFactors).
   const uploads = [...(await fillUploadWidgets(payload, doc)), ...(await fillUploadPanels(payload, doc))];
@@ -402,9 +419,10 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
 }
 
 /** Avkrysningsbokser og radioknapper: kryss av alternativet som passer med profilen. */
-function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: number; fields: FieldReport[] } {
+function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: number; fields: FieldReport[]; heardAboutOther: boolean } {
   const fields: FieldReport[] = [];
   let detected = 0;
+  let heardAboutOther = false;
   for (const group of scanChoiceGroups(doc)) {
     // Samtykker og erklæringer krysser vi aldri av.
     if (isConsentQuestion(group.question)) continue;
@@ -449,7 +467,13 @@ function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: numb
       continue;
     }
     // Krever minst «starter med»-treff, så vi ikke krysser av noe som bare ligner litt.
-    const i = isPref ? prefOptionIndex(result.key, group.options.map((o) => o.text), text) : bestOptionIndex(group.options, text, 2);
+    const texts = group.options.map((o) => o.text);
+    let i = isPref ? prefOptionIndex(result.key, texts, text) : bestOptionIndex(group.options, text, 2);
+    if (result.key === "heardAbout") {
+      const h = heardAboutOptionIndex(texts, text);
+      i = h.index;
+      heardAboutOther ||= h.other;
+    }
     const option = group.options[i];
     if (!option) continue;
 
@@ -458,7 +482,32 @@ function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: numb
     report.status = sure ? "filled" : "uncertain";
     highlight(option.el.labels?.[0] ?? option.el, sure ? "filled" : "uncertain", `Masterkey: ${FIELD_LABELS[result.key]}`);
   }
-  return { detected, fields };
+  return { detected, fields, heardAboutOther };
+}
+
+/** Teksten et felt viser (valgt alternativ i en liste, eller verdien). */
+function shownText(el: Element): string {
+  if (el instanceof HTMLSelectElement) return el.selectedOptions[0]?.text ?? "";
+  // react-select: valget vises i en egen boks ved siden av søkefeltet.
+  const box = el.closest('[class*="container" i], [class*="select" i]') ?? el.parentElement;
+  return (el instanceof HTMLInputElement && el.value) || box?.textContent || el.textContent || "";
+}
+
+/** «If you selected "Other", please specify»: utdypingen av hvor brukeren hørte om stillingen, på sidens språk. */
+function fillOtherSpecify(payload: FillPayload, doc: Document): FieldReport[] {
+  const detail = heardAboutDetail(payload.profile, pageLanguage(doc));
+  if (!detail) return [];
+  for (const el of scanFields(doc)) {
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) || ["file", "checkbox", "radio", "hidden"].includes((el as HTMLInputElement).type)) continue;
+    if (hasValue(el)) continue;
+    const q = norm(questionOf(el));
+    if (!/(other|annet|andre).*(specify|spesifiser|utdyp|describe|beskriv)|(specify|spesifiser|utdyp).*(other|annet)/.test(q)) continue;
+    setTextValue(el, detail);
+    highlight(el, "filled", "Masterkey: Hvor du hørte om stillingen");
+    log(`«Other, please specify» ← «${detail.slice(0, 40)}»`);
+    return [{ key: "heardAbout", label: `${FIELD_LABELS.heardAbout} (utdyping)`, confidence: 0.9, status: "filled" }];
+  }
+  return [];
 }
 
 export function createEngine(doc: Document = document): EngineApi {
