@@ -117,7 +117,12 @@ export function describeField(el: FillableElement): FieldDescriptor {
   const tag: FieldDescriptor["tag"] =
     el instanceof HTMLInputElement ? "input" : el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement || isDropdown ? "select" : "contenteditable";
   const isFile = el instanceof HTMLInputElement && el.type === "file";
-  const ownLabel = labelText(el);
+  let ownLabel = labelText(el);
+  // «Day»/«Month»/«Year» i en gruppe «Date of birth»: ta med gruppens overskrift.
+  if (/^\s*(day|month|year|dag|måned|år|dd|mm|yyyy|åååå)\s*:?\s*$/i.test(ownLabel)) {
+    const legend = el.closest("fieldset")?.querySelector("legend");
+    if (legend) ownLabel = `${clip(legend.textContent)} ${ownLabel}`.trim();
+  }
   return {
     tag,
     type: el instanceof HTMLInputElement ? el.type : undefined,
@@ -150,7 +155,8 @@ export const PLACEHOLDER_WORDS = /velg|vælg|välj|vel\b|choose|select|please|w�
 
 function isPlaceholderOption(opt: HTMLOptionElement | undefined): boolean {
   if (!opt) return true;
-  return opt.value === "" || PLACEHOLDER_WORDS.test(opt.text);
+  // «- Day -», «-- Select --»: tekst mellom streker er en plassholder.
+  return opt.value === "" || PLACEHOLDER_WORDS.test(opt.text) || /^\s*-+\s*[^-]+?\s*-+\s*$/.test(opt.text);
 }
 
 /**

@@ -10,7 +10,10 @@ import {
   HIGH_CONFIDENCE,
   heardAboutDetail,
   heardAboutOptionIndex,
+  gradeLetter,
+  disciplinePicks,
   isConsentQuestion,
+  nationalityOf,
   languageOptionPicks,
   latestEducation,
   QUESTION_DEPENDENT_KEYS,
@@ -87,12 +90,18 @@ export function classifyDocument(
     // Innloggingsbokser («Log ind», e-post + passord) hører ikke til søknaden.
     if (inLoginForm(el)) continue;
     const isFile = el instanceof HTMLInputElement && el.type === "file";
+    // «Upload your CV here» som leser CV-en og fyller ut skjemaet (EasyCruit, «apply with CV»): ikke et vedlegg.
+    if (isFile && /pars|apply.?with.?cv|cv.?import|autofill/i.test(`${el.id} ${el.className} ${el.getAttribute("name") ?? ""}`)) continue;
     // Filfelt i et skjult panel (f.eks. Webcruiters «Last opp ny fil» før panelet er åpnet) hører ikke til skjemaet ennå.
     if (isFile && el.parentElement && !isVisible(el.parentElement)) continue;
     if (isFile) fileInputs++;
     const override = overrides.get(el) ?? (isDialCodeSelect(el) ? "country" : undefined);
     const descriptor = describeField(el);
-    const result = override ? { key: override, confidence: 1 } : classifyField(descriptor);
+    let result = override ? { key: override, confidence: 1 } : classifyField(descriptor);
+    // «Upload certificate» etter «Work experience» er en arbeidsattest, ikke vitnemål.
+    if (result?.key === "diplomaFile" && /certificate/i.test(descriptor.label ?? "") && /work|employment|arbeid|reference/i.test(nearestHeading(el))) {
+      result = { key: "workCertificateFile", confidence: result.confidence };
+    }
     if (result) matches.push({ el, result });
     else if (isFile) unclassifiedFiles.push(el as HTMLInputElement);
     else {
@@ -159,8 +168,41 @@ function countryCodeOptionIndex(texts: string[], country: string, profile: FullP
 }
 
 /** Velger riktig alternativ i en liste for en felttype. */
+/** Telefonfelt uten landskode (autocomplete «tel-local»/«tel-national», f.eks. EasyCruit sitt «Number»). */
+function wantsLocalNumber(el: Element): boolean {
+  return /tel-(local|national)/.test(el.getAttribute("autocomplete") ?? "");
+}
+
+/** «+47 912 34 567» → «91234567». */
+function localPhone(phone: string): string {
+  return phone.replace(/^\s*(\+|00)\d{1,3}[\s-]*/, "").replace(/\D/g, "");
+}
+
+/** Teksten i nærmeste overskrift (h1–h3) før elementet. */
+function nearestHeading(el: Element): string {
+  const headings = Array.from(el.ownerDocument.querySelectorAll("h1, h2, h3")).filter((h) => h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return headings.at(-1)?.textContent ?? "";
+}
+
 function optionMatcher(key: FieldKey, value: string, profile: FullProfile) {
   return (texts: string[]) => {
+    if (key === "studyYear") {
+      // «2.», «2nd year», «Year 2», «2. år».
+      const i = texts.findIndex((t) => new RegExp(`(^|\\D)${value}(\\D|$)`).test(t.trim()) && !/\d{2}/.test(t));
+      if (i >= 0) return i;
+    }
+    if (key === "grade") {
+      // Tallsnitt (3.25, A = 5) i en liste med bokstaver.
+      const letter = gradeLetter(value);
+      const i = letter ? texts.findIndex((t) => t.trim().toUpperCase() === letter) : -1;
+      if (i >= 0) return i;
+    }
+    if (key === "country") {
+      // Nasjonalitet: «Norwegian», ikke «Norway».
+      const nationality = nationalityOf(value);
+      const i = nationality ? texts.findIndex((t) => t.trim().toLowerCase() === nationality.toLowerCase()) : -1;
+      if (i >= 0) return i;
+    }
     // Faste søknadssvar: «yes» → «Yes»/«Ja», «remote» → «Remote» osv. Hørte om oss: kategorien, ellers «Other».
     if (key === "heardAbout") return heardAboutOptionIndex(texts, value).index;
     if (PREF_CHOICE_KEYS.includes(key)) return prefOptionIndex(key, texts, value);
@@ -358,7 +400,9 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
         ok = await pickFromListbox(el, optionMatcher(key, value.value, payload.profile));
       } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         const text =
-          key === "birthDate"
+          key === "phone" && wantsLocalNumber(el)
+            ? localPhone(value.value)
+            : key === "birthDate"
             ? formatDateForInput(value.value, (el as HTMLInputElement).type)
             : key === "heardAbout"
               ? (heardAboutDetail(payload.profile, pageLanguage(doc)) ?? prefDisplay(key, value.value))
@@ -415,7 +459,14 @@ export async function fillDocument(payload: FillPayload, doc: Document = documen
   const uploads = [...(await fillUploadWidgets(payload, doc)), ...(await fillUploadPanels(payload, doc))];
   fields.push(...uploads);
 
-  return { url: doc.location?.href ?? "", adapter, detected: matches.length + groups.detected + sections.fields.length + uploads.length, fields, unrecognized };
+  return {
+    url: doc.location?.href ?? "",
+    adapter,
+    detected: matches.length + groups.detected + sections.fields.length + uploads.length,
+    fields,
+    unrecognized,
+    subpageAdds: findSubpageAdds(payload, doc),
+  };
 }
 
 /** Avkrysningsbokser og radioknapper: kryss av alternativet som passer med profilen. */
@@ -441,6 +492,16 @@ function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: numb
 
     if (!payload.overwrite && group.options.some((o) => o.el.checked)) {
       report.status = "skipped-has-value";
+      continue;
+    }
+    // «Is there a discipline you prefer to work in?» (avkrysning): fagområdene som passer studiet.
+    if (result.key === "fieldOfStudy" && group.options[0]?.el.type === "checkbox") {
+      const picks = disciplinePicks(group.options.map((o) => o.text), payload.profile);
+      for (const i of picks) {
+        checkOption(group.options[i]!.el);
+        highlight(group.options[i]!.el.labels?.[0] ?? group.options[i]!.el, "uncertain", "Masterkey: ut fra studiet ditt. Sjekk at det stemmer.");
+      }
+      if (picks.length) report.status = "uncertain";
       continue;
     }
     // Språk som alternativer (Danish / Finnish / Swedish / None of the above): kryss av det brukeren kan.
@@ -483,6 +544,34 @@ function fillChoiceGroups(payload: FillPayload, doc: Document): { detected: numb
     highlight(option.el.labels?.[0] ?? option.el, sure ? "filled" : "uncertain", `Masterkey: ${FIELD_LABELS[result.key]}`);
   }
   return { detected, fields, heardAboutOther };
+}
+
+/**
+ * «Add» som sender skjemaet og åpner en egen side (EasyCruit: «Education [Add]» → side for å laste opp
+ * vitnemål, «Work experience [Add]» → arbeidsattest). Extensionen kan ikke fortsette på en ny side selv,
+ * så bakgrunnen tar seg av det. Bare når profilen har dokumentet og seksjonen ikke har noe fra før.
+ */
+function findSubpageAdds(payload: FillPayload, doc: Document): NonNullable<FrameReport["subpageAdds"]> {
+  const has = (type: string) => payload.profile.documents.some((d) => d.type === type);
+  const out: NonNullable<FrameReport["subpageAdds"]> = [];
+  for (const button of Array.from(doc.querySelectorAll<HTMLInputElement>('input[type="submit"][name^="b_add"]'))) {
+    const heading = Array.from(doc.querySelectorAll("h1, h2, h3, h4")).filter((h) => h.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1);
+    const title = heading?.textContent ?? "";
+    const kind = /education|utdanning/i.test(title) && has("diploma") ? "educations" : /work experience|employment|arbeidserfaring|yrkeserfaring/i.test(title) && has("work_certificate") ? "experiences" : null;
+    if (!heading || !kind) continue;
+    // Står det noe mellom overskriften og knappen, er noe allerede lagt til.
+    const range = doc.createRange();
+    range.setStartAfter(heading);
+    range.setEndBefore(button);
+    if (range.toString().replace(/[\s*]/g, "").length > 0) continue;
+    out.push({ kind, button: button.name });
+  }
+  return out;
+}
+
+/** Undersiden etter «Add» (EasyCruit «b_multi_add»): navnet på knappen som legger til og går tilbake. */
+export function subpageAddButton(doc: Document): string | null {
+  return doc.querySelector<HTMLInputElement>('input[type="submit"][name="b_multi_add"]')?.name ?? null;
 }
 
 /** Teksten et felt viser (valgt alternativ i en liste, eller verdien). */

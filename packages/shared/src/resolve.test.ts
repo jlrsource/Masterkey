@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeCompleteness } from "./completeness";
-import { formatDateForInput, resolveValue, yearsOfExperience } from "./resolve";
+import { formatDateForInput, gradeLetter, resolveValue, studyYear, yearsOfExperience } from "./resolve";
 import { emptyProfile, type FullProfile } from "./schema";
 
 const profile: FullProfile = {
@@ -74,5 +74,19 @@ describe("yearsOfExperience", () => {
   });
   it("gir null uten datoer", () => {
     expect(yearsOfExperience(emptyProfile(), today)).toBeNull();
+  });
+});
+
+describe("studyYear og gradeLetter", () => {
+  const p: FullProfile = { ...emptyProfile(), educations: [{ school: "NTNU", start_date: "2025-08-01", end_date: "2030-06-01", sort_order: 0 }] };
+  it("regner ut årskurset fra startdatoen", () => {
+    expect(studyYear(p, new Date("2026-11-03"))).toBe(2);
+    expect(studyYear(p, new Date("2025-09-01"))).toBe(1);
+    expect(studyYear({ ...p, educations: [{ school: "UiO", start_date: "2015-08-01", end_date: "2019-06-01", sort_order: 0 }] }, new Date("2026-11-03"))).toBeNull();
+  });
+  it("gjør tallsnitt om til bokstav (A = 5)", () => {
+    expect(gradeLetter("3.25")).toBe("C");
+    expect(gradeLetter("4,6")).toBe("A");
+    expect(gradeLetter("B")).toBeNull();
   });
 });

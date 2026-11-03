@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSavedAnswer, isConsentQuestion, prefAnswer, prefOptionIndex } from "./applicationAnswers";
+import { disciplinePicks, findSavedAnswer, isConsentQuestion, prefAnswer, prefOptionIndex } from "./applicationAnswers";
 import { emptyProfile, type FullProfile } from "./schema";
 
 const withPrefs = (application_prefs: NonNullable<FullProfile["personal"]>["application_prefs"]): FullProfile => ({
@@ -86,5 +86,17 @@ describe("tidligere ansatt", () => {
     const a = prefAnswer("previousEmployer", p, "Are you a current or previous employee of KPMG?");
     expect(a?.value).toBe("no");
     expect(options[prefOptionIndex("previousEmployer", options, "no")]).toBe("No previous work experience with the company");
+  });
+});
+
+describe("disciplinePicks", () => {
+  it("velger fagområder ut fra studiet", () => {
+    const p: FullProfile = { ...emptyProfile(), educations: [{ school: "NTNU", field_of_study: "Ingeniørvitenskap og IKT", sort_order: 0 }] };
+    const options = ["Finance", "IT", "Supply Chain/Logistics", "HR", "Legal & Compliance", "Technical department", "Communication", "Irrelevant"];
+    expect(disciplinePicks(options, p).map((i) => options[i])).toEqual(["IT", "Technical department"]);
+  });
+  it("velger ingenting når studiet ikke passer", () => {
+    const p: FullProfile = { ...emptyProfile(), educations: [{ school: "UiO", field_of_study: "Historie", sort_order: 0 }] };
+    expect(disciplinePicks(["Finance", "IT"], p)).toEqual([]);
   });
 });

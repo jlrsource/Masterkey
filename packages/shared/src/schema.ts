@@ -150,7 +150,7 @@ export const savedAnswerSchema = z.object({
 });
 export type SavedAnswer = z.infer<typeof savedAnswerSchema>;
 
-export const DOCUMENT_TYPES = ["cv", "cover_letter", "diploma", "other"] as const;
+export const DOCUMENT_TYPES = ["cv", "cover_letter", "diploma", "work_certificate", "other"] as const;
 export const documentSchema = z.object({
   id: z.uuid().optional(),
   type: z.enum(DOCUMENT_TYPES),
@@ -209,6 +209,7 @@ export const LANGUAGE_LEVEL_LABELS: Record<(typeof LANGUAGE_LEVELS)[number], str
 export const DOCUMENT_TYPE_LABELS: Record<(typeof DOCUMENT_TYPES)[number], string> = {
   cv: "CV",
   cover_letter: "Søknadsbrev",
-  diploma: "Vitnemål / attest",
+  diploma: "Vitnemål / karakterutskrift",
+  work_certificate: "Arbeidsattest",
   other: "Annet",
 };

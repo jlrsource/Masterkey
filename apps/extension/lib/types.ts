@@ -1,7 +1,7 @@
 import type { DocLanguage, FieldKey, FullProfile } from "@soknadsprofil/shared";
 import type { SectionKind } from "./engine/sections";
 
-export type FileKey = Extract<FieldKey, "cvFile" | "coverLetterFile" | "diplomaFile">;
+export type FileKey = Extract<FieldKey, "cvFile" | "coverLetterFile" | "diplomaFile" | "workCertificateFile">;
 
 export interface FilePayload {
   name: string;
@@ -35,6 +35,8 @@ export interface FrameReport {
   fields: FieldReport[];
   /** Tekst fra felt som ikke ble gjenkjent, så brukeren ser hva som ble hoppet over. */
   unrecognized: string[];
+  /** «Add»-knapper som åpner en egen side (EasyCruit). Bakgrunnen klikker og fyller ut den siden. */
+  subpageAdds?: { kind: SectionKind; button: string }[];
 }
 
 export interface FillSummary {

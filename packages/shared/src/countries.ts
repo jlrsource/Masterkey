@@ -53,3 +53,16 @@ export function dialCode(phone: string | null | undefined): string | null {
   const m = /^\s*(?:\+|00)(\d{1,3})[\s-]/.exec(phone ?? "");
   return m?.[1] ?? null;
 }
+
+/** Nasjonalitet på engelsk («Norway» → «Norwegian»), for lister som «Nationality: Norwegian». */
+const DEMONYMS: Record<string, string> = {
+  Norway: "Norwegian", Sweden: "Swedish", Denmark: "Danish", Finland: "Finnish", Iceland: "Icelandic", Germany: "German",
+  "United Kingdom": "British", "United States": "American", Netherlands: "Dutch", France: "French", Spain: "Spanish",
+  Italy: "Italian", Poland: "Polish", Austria: "Austrian", Switzerland: "Swiss", Belgium: "Belgian", Ireland: "Irish",
+  Portugal: "Portuguese", Greece: "Greek", Canada: "Canadian", Australia: "Australian", India: "Indian", China: "Chinese", Japan: "Japanese",
+};
+
+export function nationalityOf(country: string | null | undefined): string | null {
+  const english = englishCountry(country) ?? (country ?? "").trim();
+  return DEMONYMS[english] ?? null;
+}

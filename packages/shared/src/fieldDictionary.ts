@@ -11,6 +11,7 @@ export const AUTOCOMPLETE_MAP: Record<string, FieldKey> = {
   email: "email",
   tel: "phone",
   "tel-national": "phone",
+  "tel-local": "phone",
   "street-address": "address",
   "address-line1": "address",
   "postal-code": "postalCode",
@@ -37,7 +38,7 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   address: ["adresse", "gateadresse", "postadresse", "address", "street", "street address", "address line 1", "address1"],
   postalCode: ["postnummer", "postnr", "post nr", "zip", "zip code", "zipcode", "postal code", "postcode", "postal"],
   city: ["poststed", "sted", "by", "city", "town", "bosted"],
-  country: ["land", "country", "nasjonalitet"],
+  country: ["land", "country", "nasjonalitet", "nationality", "statsborgerskap", "citizenship"],
   birthDate: ["fødselsdato", "fodselsdato", "født", "fødselsår", "fødeår", "birth date", "date of birth", "birthdate", "dob", "birthday", "year of birth", "birth year"],
   linkedin: ["linkedin", "linked in", "linkedin url", "linkedin profil", "linkedin profile"],
   website: ["nettside", "hjemmeside", "portefølje", "portfolio", "website", "personal website", "web site", "homepage", "url", "web address", "webadresse", "nettadresse"],
@@ -56,6 +57,10 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   yearsExperience: [
     "års erfaring", "års relevant erfaring", "år med erfaring", "antall år erfaring", "år arbeidserfaring", "arbeidserfaring år",
     "years of experience", "years experience", "years of relevant experience", "years of work experience", "how many years",
+  ],
+  studyYear: [
+    "which year are you in", "what year are you in", "year of study", "current year of study", "study year", "which year of your studies",
+    "hvilket år går du", "hvilket studieår", "hvilket årskurs", "årskurs", "årstrinn", "studieår",
   ],
   grade: ["snittkarakter", "karaktersnitt", "gjennomsnittskarakter", "gjennomsnittlig karakter", "snitt", "gpa", "grade point average", "average grade"],
   studyCity: [
@@ -78,6 +83,7 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   heardAbout: [
     "hvordan hørte du", "hvor hørte du", "hvor fant du", "hvor så du", "hvordan fikk du vite", "hvordan ble du kjent med",
     "how did you hear", "where did you hear", "how did you find", "where did you find", "how did you learn about",
+    "find out about", "first find out", "first hear about", "hear about the position", "hear about this position", "hear about the job",
   ],
   pronouns: ["pronomen", "pronouns", "pronoun"],
   restrictiveAgreement: [
@@ -96,7 +102,11 @@ export const KEYWORDS: Record<FieldKey, string[]> = {
   motivation: ["motivasjon", "hvorfor søker du", "hvorfor vil du", "hvorfor oss", "søknadstekst", "motivation", "why do you want", "why are you interested", "cover letter text", "why us"],
   cvFile: ["cv", "resume", "résumé", "curriculum vitae", "last opp cv", "upload cv", "upload resume"],
   coverLetterFile: ["søknadsbrev", "søknad", "følgebrev", "cover letter", "coverletter", "motivasjonsbrev", "letter"],
-  diplomaFile: ["vitnemål", "vitnemal", "attest", "attester", "karakterutskrift", "karakterkort", "diploma", "transcript", "transcripts", "grades"],
+  workCertificateFile: [
+    "arbeidsattest", "arbeidsattester", "attest fra arbeidsgiver", "work certificate", "employment certificate", "certificate of employment",
+    "reference letter", "letter of reference", "work reference",
+  ],
+  diplomaFile: ["vitnemål", "vitnemal", "attest", "attester", "karakterutskrift", "karakterkort", "diploma", "transcript", "transcripts", "grades", "certificate", "upload certificate"],
 };
 
 const NON_CV_DOCUMENTS = [
@@ -117,7 +127,7 @@ export const NEGATIVE_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
   currentEmployer: ["tidligere", "previous", "former", "pronoun", "pronouns", "pronomen"],
   // «Will you require sponsorship for employment visa status?» handler om visum, ikke arbeidstillatelse.
   workAuthorization: ["sponsor", "sponsorship", "visa", "visum"],
-  currentTitle: ["mr", "mrs", "tiltale", "salutation", "søker", "søke", "apply", "applying"],
+  currentTitle: ["mr", "mrs", "tiltale", "salutation", "søker", "søke", "apply", "applying", "find out", "hear about", "learn about", "hørte", "fant du"],
   // Filfelt for andre dokumenter skal aldri få CV-en.
   cvFile: ["søknadsbrev", "cover letter", ...NON_CV_DOCUMENTS],
   coverLetterFile: NON_CV_DOCUMENTS,

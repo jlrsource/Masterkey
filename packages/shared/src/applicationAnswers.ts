@@ -188,6 +188,32 @@ export function heardAboutDetail(p: FullProfile, lang: "en" | "no" | null): stri
   return (lang === "en" ? en || no : no || en) || null;
 }
 
+/** Fagområder i lister som «Is there a discipline you prefer to work in?»: [alternativ, studium]. */
+const DISCIPLINES: [RegExp, RegExp][] = [
+  [/(^| )it( |$)|information technology|software|digital|ikt|data/, /ikt|informatikk|datateknologi|computer|software|information|data|programmering|cyber|kybernetikk|(^| )it( |$)/],
+  [/technical|engineering|teknisk|ingeniør|research and development|r d/, /ingeniør|engineer|teknologi|technology|mekanikk|elektro|fysikk|kybernetikk|maskin|sivilingeniør|marin/],
+  [/finance|økonomi|accounting|controlling|regnskap/, /økonomi|finans|finance|economics|regnskap|business|siviløkonom/],
+  [/(^| )hr( |$)|human resources|personal/, /(^| )hr( |$)|personal|organisasjon|psykologi|human resource/],
+  [/legal|law|juridisk|compliance/, /juss|rettsvitenskap|(^| )law( |$)|(^| )jus( |$)|juridisk/],
+  [/communication|kommunikasjon|marketing|markedsføring|media/, /kommunikasjon|medie|journalistikk|markedsføring|communication|marketing/],
+  [/supply|logistic|logistikk|procurement|innkjøp/, /logistikk|logistics|supply|industriell økonomi/],
+];
+
+/**
+ * Fagområder brukeren trolig vil jobbe i, ut fra studiet («Ingeniørvitenskap og IKT» → «IT» og
+ * «Technical department»). Tom liste når ingenting passer.
+ */
+export function disciplinePicks(texts: string[], p: FullProfile): number[] {
+  const edu = [...(p.educations ?? [])].sort((a, b) => (b.start_date ?? "").localeCompare(a.start_date ?? ""))[0];
+  if (!edu) return [];
+  const study = normalize([edu.field_of_study, edu.degree, ...(edu.field_of_study_en ?? [])].filter(Boolean).join(" "));
+  if (!study) return [];
+  return texts
+    .map((t, i) => ({ t: normalize(t), i }))
+    .filter(({ t }) => DISCIPLINES.some(([option, field]) => option.test(t) && field.test(study)))
+    .map(({ i }) => i);
+}
+
 /** Teksten som skrives i et vanlig tekstfelt («Ja», «Hybrid» …). */
 export function prefDisplay(key: FieldKey, value: string): string {
   const group = value === "yes" || value === "no" ? "yesNo" : key;

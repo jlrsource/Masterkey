@@ -54,6 +54,10 @@ export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | nul
     case "degree": return text(latestEducation(p)?.degree);
     case "fieldOfStudy": return text(latestEducation(p)?.field_of_study);
     case "grade": return text(latestEducation(p)?.grade);
+    case "studyYear": {
+      const n = studyYear(p);
+      return n === null ? null : text(String(n));
+    }
     case "yearsExperience": {
       const years = yearsOfExperience(p);
       return years === null ? null : text(String(years));
@@ -65,6 +69,10 @@ export function resolveValue(key: FieldKey, p: FullProfile): ResolvedValue | nul
     }
     case "diplomaFile": {
       const d = pickDocument(p.documents, "diploma");
+      return d ? { kind: "file", document: d } : null;
+    }
+    case "workCertificateFile": {
+      const d = pickDocument(p.documents, "work_certificate");
       return d ? { kind: "file", document: d } : null;
     }
     case "coverLetterFile": {
@@ -110,4 +118,26 @@ export function formatDateForInput(iso: string, inputType: string | undefined): 
   if (inputType === "month") return iso.slice(0, 7);
   const [y, m, d] = iso.split("-");
   return y && m && d ? `${d}.${m}.${y}` : iso;
+}
+
+/**
+ * Hvilket årskurs brukeren går i nå (1 = første år), ut fra startdatoen på en pågående utdanning.
+ * Et studieår starter i august, så høsten 2026 med start august 2025 er 2. år. Null uten pågående studium.
+ */
+export function studyYear(p: FullProfile, today = new Date()): number | null {
+  const edu = latestEducation(p);
+  if (!edu?.start_date) return null;
+  const end = edu.end_date ? new Date(edu.end_date) : null;
+  if (end && end < today) return null; // ferdig
+  const start = new Date(edu.start_date);
+  const months = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
+  if (months < 0) return null;
+  return Math.min(8, Math.floor(months / 12) + 1);
+}
+
+/** Norsk karaktersnitt som tall (f.eks. «3.25», der A = 5) til bokstav («C»), eller null. */
+export function gradeLetter(grade: string | null | undefined): string | null {
+  const n = Number((grade ?? "").replace(",", "."));
+  if (!Number.isFinite(n) || n < 1 || n > 5) return null;
+  return "EDCBA"[Math.round(n) - 1] ?? null;
 }

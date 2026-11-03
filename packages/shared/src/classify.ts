@@ -23,7 +23,7 @@ export interface Classification {
 export const MIN_CONFIDENCE = 0.5;
 export const HIGH_CONFIDENCE = 0.75;
 
-const FILE_KEYS: FieldKey[] = ["cvFile", "coverLetterFile", "diplomaFile"];
+const FILE_KEYS: FieldKey[] = ["cvFile", "coverLetterFile", "diplomaFile", "workCertificateFile"];
 const LONG_TEXT_KEYS: FieldKey[] = ["summary", "motivation"];
 
 export function normalize(text: string | undefined | null): string {

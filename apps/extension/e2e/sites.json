@@ -149,6 +149,18 @@
       "platform": "jobbnorge",
       "file": "Jobbnorge_med_lagt_til_utdanning.html",
       "overwrite": true
+    },
+    {
+      "name": "EasyCruit Kongsberg (lagret)",
+      "platform": "easycruit",
+      "file": "easycruit_kongsberg.html",
+      "overwrite": true
+    },
+    {
+      "name": "EasyCruit Kongsberg utdanning (lagret)",
+      "platform": "easycruit",
+      "file": "easycruit_kongsberg_education.html",
+      "overwrite": true
     }
   ]
 }

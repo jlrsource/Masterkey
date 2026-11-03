@@ -1637,3 +1637,61 @@ describe("Greenhouse: lister med søkefelt (react-select) for pronomen, kjønn o
     expect((document.getElementById("other") as HTMLInputElement).value).toBe("");
   }, 30000);
 });
+
+describe("EasyCruit (fra lagret side 3. nov)", () => {
+  it("fødselsdato i gruppe, nasjonalitet, nummer uten landskode, CV i riktig felt, årskurs og karakter", async () => {
+    document.documentElement.lang = "en-GB";
+    const sel = (id: string, opts: string[], selected = "") =>
+      `<select id="${id}">${opts.map((o) => `<option${o === selected ? " selected" : ""}>${o}</option>`).join("")}</select>`;
+    document.body.innerHTML = `
+      <div><label for="parse">Upload your CV here</label><input type="file" id="parse" class="apply_with_cv"></div>
+      <fieldset><legend>Date of birth:</legend>
+        <label for="d">Day</label>${sel("d", ["- Day -", ...Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"))])}
+        <label for="m">Month</label>${sel("m", ["- Month -", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"])}
+        <label for="y">Year</label>${sel("y", ["- Year -", ...Array.from({ length: 60 }, (_, i) => String(2016 - i))])}</fieldset>
+      <label for="nat">Nationality:</label>${sel("nat", ["Select", "Afghan", "Norwegian", "Swedish"])}
+      <fieldset><div><label for="pre">Prefix</label>${sel("pre", ["+46 (Sweden)", "+47 (Norway)"], "+47 (Norway)")}</div>
+        <div><label for="num">Number:</label><input id="num" type="text" autocomplete="mobile tel-local"></div></fieldset>
+      <label for="cv">Upload CV:</label><input type="file" id="cv">
+      <label for="hear">Where did you first find out about the position?</label>${sel("hear", ["- Select -", "Finn.no", "Through acquaintance", "Other", "University/college"])}
+      <label for="year">Which year are you in?</label>${sel("year", ["- Select -", "1.", "2.", "3.", "4.", "5."])}
+      <label for="gpa">Please specify your grade point average (GPA):</label>${sel("gpa", ["- Select -", "A", "B", "C", "D", "E", "N/A"])}
+      <div><span>Is there a discipline you prefer to work in?</span>
+        ${["Finance", "IT", "HR", "Technical department", "Irrelevant"].map((o, i) => `<input type="checkbox" id="disc${i}" name="field_14_216491"><label for="disc${i}">&nbsp;${o}</label>`).join("")}</div>
+      <h2>Education <span>*</span></h2><input type="submit" name="b_add_3" value="Add">
+      <h2>Work experience</h2><input type="submit" name="b_add_2" value="Add">
+      <input type="submit" name="b_next" value="Next">`;
+    class FakeDataTransfer {
+      files: File[] = [];
+      items = { add: (f: File) => this.files.push(f) };
+    }
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    const files: Record<string, File[]> = { parse: [], cv: [] };
+    for (const id of ["parse", "cv"]) Object.defineProperty(document.getElementById(id)!, "files", { get: () => files[id], set: (v: File[]) => (files[id] = v) });
+    const now = new Date();
+    const start = `${now.getFullYear() - 1}-08-01`; // startet i fjor høst: 2. år fra og med august i år
+    const p: FullProfile = {
+      ...profile,
+      personal: { ...profile.personal, application_prefs: { heard_about_source: "university" } },
+      educations: [{ school: "NTNU", degree: "Integrert master", field_of_study: "Ingeniørvitenskap og IKT", start_date: start, end_date: `${now.getFullYear() + 4}-06-01`, grade: "3.25", sort_order: 0 }],
+      documents: [
+        { type: "cv", file_name: "CV.pdf", storage_path: "a", is_default: true },
+        { type: "diploma", file_name: "Transcript.pdf", storage_path: "b", is_default: true },
+      ],
+    };
+    const report = await fillDocument({ profile: p, files: { cvFile: { name: "CV.pdf", mime: "application/pdf", base64: btoa("pdf") } }, overwrite: false }, document);
+    const shown = (id: string) => (document.getElementById(id) as HTMLSelectElement).selectedOptions[0]!.text;
+    expect([shown("d"), shown("m"), shown("y")]).toEqual(["17", "April", "1995"]);
+    expect(shown("nat")).toBe("Norwegian");
+    expect((document.getElementById("num") as HTMLInputElement).value).toBe("90000000");
+    expect(files.cv!.map((f) => f.name)).toEqual(["CV.pdf"]);
+    expect(files.parse).toEqual([]);
+    expect(shown("hear")).toBe("University/college");
+    expect(shown("year")).toBe(now.getMonth() >= 7 ? "2." : "1.");
+    expect(shown("gpa")).toBe("C");
+    const disciplines = ["Finance", "IT", "HR", "Technical department", "Irrelevant"].filter((_, i) => (document.getElementById(`disc${i}`) as HTMLInputElement).checked);
+    expect(disciplines).toEqual(["IT", "Technical department"]);
+    // «Education [Add]» åpner en egen side: bakgrunnen skal klikke den, ikke «Work experience» eller «Next».
+    expect(report.subpageAdds).toEqual([{ kind: "educations", button: "b_add_3" }]);
+  }, 30000);
+});

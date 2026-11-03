@@ -18,7 +18,8 @@ const MAX_BYTES = 10 * 1024 * 1024;
 /** Gjetter dokumenttypen ut fra filnavnet. Faller tilbake på typen brukeren har valgt. */
 function guessType(fileName: string, fallback: ProfileDocument["type"]): ProfileDocument["type"] {
   const n = fileName.toLowerCase();
-  if (/vitnem[åa]l|transcript|karakter|attest|diploma|grades/.test(n)) return "diploma";
+  if (/arbeidsattest|attest|reference|anbefaling|employment/.test(n)) return "work_certificate";
+  if (/vitnem[åa]l|transcript|karakter|diploma|grades/.test(n)) return "diploma";
   if (/s[øo]knad|cover.?letter|motivasjon/.test(n)) return "cover_letter";
   if (/\bcv\b|resume|résumé|curriculum/.test(n.replace(/[_\-.]/g, " "))) return "cv";
   return fallback;

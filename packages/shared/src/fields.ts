@@ -21,6 +21,7 @@ export const FIELD_KEYS = [
   "degree",
   "fieldOfStudy",
   "grade",
+  "studyYear",
   "yearsExperience",
   "studyCity",
   "salaryExpectation",
@@ -42,6 +43,7 @@ export const FIELD_KEYS = [
   "cvFile",
   "coverLetterFile",
   "diplomaFile",
+  "workCertificateFile",
 ] as const;
 export type FieldKey = (typeof FIELD_KEYS)[number];
 
@@ -67,6 +69,7 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
   degree: "Grad",
   fieldOfStudy: "Fagfelt",
   grade: "Karaktersnitt",
+  studyYear: "Studieår (årskurs)",
   yearsExperience: "Års erfaring",
   studyCity: "Studiested (by)",
   salaryExpectation: "Lønnskrav",
@@ -88,6 +91,7 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
   cvFile: "CV (fil)",
   coverLetterFile: "Søknadsbrev (fil)",
   diplomaFile: "Vitnemål (fil)",
+  workCertificateFile: "Arbeidsattest (fil)",
 };
 
 /** Tags på standardsvar som kobles til felttyper. */

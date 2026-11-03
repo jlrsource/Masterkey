@@ -12,7 +12,7 @@ import { composedParent, deepQueryAll, describeEl, log, sleep, waitFor } from ".
  * neste felt, siden plattformen bare har én opplastingsboks åpen om gangen.
  */
 
-type FileKey = Extract<FieldKey, "cvFile" | "coverLetterFile" | "diplomaFile">;
+type FileKey = Extract<FieldKey, "cvFile" | "coverLetterFile" | "diplomaFile" | "workCertificateFile">;
 
 export interface UploadWidget {
   container: HTMLElement;
@@ -21,7 +21,7 @@ export interface UploadWidget {
   label: string;
 }
 
-const FILE_KEYS: FileKey[] = ["cvFile", "coverLetterFile", "diplomaFile"];
+const FILE_KEYS: FileKey[] = ["cvFile", "coverLetterFile", "diplomaFile", "workCertificateFile"];
 /** «Øvrig dokumentasjon», «Vedlegg», «Other documents»: karakterutskriften passer der. */
 const OTHER_DOCUMENTS = /dokument|vedlegg|attachment|document|øvrig|annet|other|additional/i;
 
